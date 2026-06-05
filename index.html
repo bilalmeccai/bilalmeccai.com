@@ -17,6 +17,24 @@
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Playfair+Display:ital,wght@0,400;0,600;0,700;1,400&family=DM+Sans:opsz,wght@9..40,300;9..40,400;9..40,500&family=DM+Mono:wght@400;500&display=swap" rel="stylesheet">
+<script src="https://cdn.jsdelivr.net/npm/@emailjs/browser@4/dist/email.min.js"></script>
+<script>
+  // ── EMAILJS CONFIG ──────────────────────────────────────
+  // Step 1 → Sign up free at https://www.emailjs.com
+  // Step 2 → Create an Email Service (Gmail) → copy Service ID
+  // Step 3 → Create an Email Template → copy Template ID
+  //          Template variables used: {{from_email}}, {{topic}}, {{message}}
+  // Step 4 → Go to Account → API Keys → copy Public Key
+  // Step 5 → Replace the three values below
+  // ────────────────────────────────────────────────────────
+  const EMAILJS_PUBLIC_KEY  = '_UFO43_P5mAN3U4jH';   // e.g. 'abc123XYZ'
+  const EMAILJS_SERVICE_ID  = 'service_f3q1cyp';   // e.g. 'service_xxxxxx'
+  const EMAILJS_TEMPLATE_ID = 'template_qumbxfs';  // e.g. 'template_xxxxxx'
+
+  document.addEventListener('DOMContentLoaded', () => {
+    emailjs.init({ publicKey: EMAILJS_PUBLIC_KEY });
+  });
+</script>
 
 <style>
 /* ════════════════════════════════════════
@@ -853,6 +871,24 @@ nav.scrolled { border-bottom-color: var(--rule); }
   letter-spacing: 0.05em;
 }
 
+.cta-message-input {
+  width: 100%;
+  margin-top: 10px;
+  padding: 13px 16px;
+  font-family: var(--sans);
+  font-size: 0.88rem;
+  border: 1px solid var(--rule);
+  background: var(--paper);
+  color: var(--ink);
+  outline: none;
+  resize: vertical;
+  min-height: 80px;
+  line-height: 1.6;
+  transition: border-color 0.2s;
+}
+.cta-message-input:focus { border-color: var(--accent); }
+.cta-message-input::placeholder { color: var(--ink-muted); }
+
 /* ════════════════════════════════════════
    FOOTER
 ════════════════════════════════════════ */
@@ -1276,9 +1312,10 @@ footer {
       </div>
     </div>
     <div class="cta-email-row">
-      <input type="email" class="cta-email-input" placeholder="your@email.com" aria-label="Your email address">
+      <input type="email" class="cta-email-input" id="ctaEmail" placeholder="your@email.com" aria-label="Your email address">
       <button class="cta-submit" onclick="handleSubmit()" aria-label="Send message">Send →</button>
     </div>
+    <textarea class="cta-message-input" id="ctaMessage" placeholder="Briefly describe your situation (optional)" aria-label="Your message" rows="3"></textarea>
     <p class="cta-note">No spam. No sales deck. Just a direct reply from Bilal.</p>
   </div>
 </section>
@@ -1374,25 +1411,69 @@ document.querySelectorAll('.cta-option').forEach(el => {
   el.addEventListener('keydown', e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); selectOption(el); } });
 });
 
-/* ── CTA SUBMIT ── */
-function handleSubmit() {
-  const input = document.querySelector('.cta-email-input');
-  const btn = document.querySelector('.cta-submit');
+/* ── CTA SUBMIT — EmailJS ── */
+async function handleSubmit() {
+  const input   = document.getElementById('ctaEmail');
+  const msgEl   = document.getElementById('ctaMessage');
+  const btn     = document.querySelector('.cta-submit');
   const selected = document.querySelector('.cta-option.selected');
-  const email = input.value.trim();
+  const email   = input.value.trim();
+  const message = msgEl ? msgEl.value.trim() : '';
   const emailRe = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
-  if (emailRe.test(email)) {
-    const topic = selected ? selected.querySelector('.option-title').textContent : 'General enquiry';
-    const mailto = `mailto:bilalmeccai@gmail.com?subject=${encodeURIComponent(topic)}&body=${encodeURIComponent('Hi Bilal,\n\nI found your site and wanted to get in touch.\n\nMy email: ' + email)}`;
-    window.location.href = mailto;
-    btn.textContent = 'Sent ✓';
-    btn.style.background = '#2a7a4a';
-    input.value = '';
-    setTimeout(() => { btn.textContent = 'Send →'; btn.style.background = ''; }, 3000);
-  } else {
+
+  // Validate
+  if (!emailRe.test(email)) {
     input.style.borderColor = '#c0392b';
     input.focus();
     setTimeout(() => { input.style.borderColor = ''; }, 1800);
+    return;
+  }
+
+  // Loading state
+  btn.textContent = 'Sending…';
+  btn.disabled = true;
+  btn.style.opacity = '0.7';
+
+  const topic = selected
+    ? selected.querySelector('.option-title').textContent
+    : 'General enquiry';
+
+  try {
+    await emailjs.send(EMAILJS_SERVICE_ID, EMAILJS_TEMPLATE_ID, {
+      name:      email,          // {{name}} in template — visitor's email as identifier
+      email:     email,          // {{email}} in template — used for Reply To
+      from_email: email,         // fallback
+      topic:     topic,          // {{topic}} in template — the option they selected
+      message:   message || '(No message provided)', // {{message}} in template
+      time:      new Date().toLocaleString('en-IN', { timeZone: 'Asia/Kolkata', dateStyle: 'medium', timeStyle: 'short' }), // {{time}} in template
+      reply_to:  email,
+    });
+
+    // Success
+    btn.textContent  = 'Sent ✓';
+    btn.style.background = '#2a7a4a';
+    btn.style.opacity = '1';
+    input.value = '';
+    if (msgEl) msgEl.value = '';
+    document.querySelectorAll('.cta-option').forEach(o => o.classList.remove('selected'));
+
+    setTimeout(() => {
+      btn.textContent  = 'Send →';
+      btn.style.background = '';
+      btn.disabled = false;
+    }, 4000);
+
+  } catch (err) {
+    // Error state
+    console.error('EmailJS error:', err);
+    btn.textContent  = 'Failed — try again';
+    btn.style.background = '#c0392b';
+    btn.style.opacity = '1';
+    btn.disabled = false;
+    setTimeout(() => {
+      btn.textContent  = 'Send →';
+      btn.style.background = '';
+    }, 3000);
   }
 }
 
