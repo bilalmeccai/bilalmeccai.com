@@ -1,9 +1,8 @@
+# syntax=docker/dockerfile:1
 FROM node:20-slim
 
-# Install git (needed for bot's git operations)
 RUN apt-get update && apt-get install -y git curl && rm -rf /var/lib/apt/lists/*
 
-# Install Claude Code CLI — uses ANTHROPIC_API_KEY at runtime, no interactive login needed
 RUN npm install -g @anthropic-ai/claude-code
 
 WORKDIR /app
@@ -11,10 +10,30 @@ WORKDIR /app
 COPY package*.json ./
 RUN npm install --production
 
-COPY bot.cjs start.sh ./
-RUN chmod +x start.sh
+COPY bot.cjs ./
 
-# Claude project dir — set to the cloned repo location in start.sh
+# Embed startup script inline — avoids Railway build context caching issues with start.sh
+RUN <<'EOF' sh
+cat > /app/start.sh << 'SCRIPT'
+#!/bin/sh
+set -e
+REPO="${GITHUB_REPO:-bilalmeccai/bilalmeccai.com}"
+REPO_URL="https://x-access-token:${GITHUB_TOKEN}@github.com/${REPO}.git"
+echo "[start] Cloning ${REPO}..."
+rm -rf /workspace/project
+git clone "$REPO_URL" /workspace/project
+cd /workspace/project
+git remote set-url origin "$REPO_URL"
+git config user.email "bilalmeccai@gmail.com"
+git config user.name "bilalmeccai"
+mkdir -p .claude-flow/data .claude-flow/logs
+echo "[start] Starting bot..."
+cd /app
+exec node bot.cjs
+SCRIPT
+chmod +x /app/start.sh
+EOF
+
 ENV CLAUDE_PROJECT_DIR=/workspace/project
 
-CMD ["./start.sh"]
+CMD ["/app/start.sh"]
