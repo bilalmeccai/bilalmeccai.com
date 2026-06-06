@@ -488,19 +488,33 @@ function parseSessions() {
   } catch (_) { return []; }
 }
 
-// Read the transcript path for a session from sessions.log
-function getTranscriptPath(sessionId) {
+// Search for a transcript JSONL across all Claude Code projects in USERPROFILE
+function findTranscriptAnywhere(sessionId) {
   try {
-    if (!fs.existsSync(SESSIONS_LOG)) return null;
-    const content = fs.readFileSync(SESSIONS_LOG, 'utf8');
-    for (const block of content.split(/\n(?=\[)/)) {
-      if (block.includes(sessionId)) {
-        const m = block.match(/Transcript\s*:\s*(.+)/);
-        if (m) return m[1].trim();
-      }
+    const base = path.join(process.env.USERPROFILE || process.env.HOME || '', '.claude', 'projects');
+    if (!fs.existsSync(base)) return null;
+    for (const proj of fs.readdirSync(base)) {
+      const candidate = path.join(base, proj, `${sessionId}.jsonl`);
+      if (fs.existsSync(candidate)) return candidate;
     }
   } catch (_) {}
   return null;
+}
+
+// Read the transcript path for a session — checks sessions.log first, then searches globally
+function getTranscriptPath(sessionId) {
+  try {
+    if (fs.existsSync(SESSIONS_LOG)) {
+      const content = fs.readFileSync(SESSIONS_LOG, 'utf8');
+      for (const block of content.split(/\n(?=\[)/)) {
+        if (block.includes(sessionId)) {
+          const m = block.match(/Transcript\s*:\s*(.+)/);
+          if (m) return m[1].trim();
+        }
+      }
+    }
+  } catch (_) {}
+  return findTranscriptAnywhere(sessionId);
 }
 
 // Pull the last N human/assistant turns from a JSONL transcript, as plain text
@@ -606,6 +620,13 @@ bot.command('summarize', async (ctx) => {
       ]),
     }
   );
+});
+
+// "Other session" → prompt for UUID (searches all Claude projects)
+bot.action('sum_manual', async (ctx) => {
+  await ctx.answerCbQuery();
+  PENDING.set(ctx.chat.id, 'summarize');
+  await ctx.reply('Paste the session UUID — I\'ll search across all your Claude Code projects:', Markup.forceReply().selective());
 });
 
 // Session picker → show format buttons
@@ -767,6 +788,7 @@ bot.on('text', async (ctx) => {
       const label = `${s.date}  ${s.id.slice(0, 8)}…${s.id.slice(-4)}${s.id === current ? ' ◀ active' : ''}`;
       return [Markup.button.callback(label, `sum_pick:${s.id}`)];
     });
+    buttons.push([Markup.button.callback('🔍 Other session (paste UUID)…', 'sum_manual')]);
     return ctx.reply('*Choose a session to summarise:*', {
       parse_mode: 'Markdown',
       ...Markup.inlineKeyboard(buttons),
