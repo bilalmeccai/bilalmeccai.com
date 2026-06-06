@@ -5,6 +5,7 @@ REPO="${GITHUB_REPO:-bilalmeccai/bilalmeccai.com}"
 REPO_URL="https://x-access-token:${GITHUB_TOKEN}@github.com/${REPO}.git"
 
 echo "[start] Cloning ${REPO}..."
+rm -rf /workspace/project
 git clone "$REPO_URL" /workspace/project
 
 cd /workspace/project
