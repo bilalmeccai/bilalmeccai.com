@@ -18,21 +18,51 @@ const ALLOWED_IDS = (process.env.TELEGRAM_ALLOWED_USER_IDS || '')
 
 const PROJECT_DIR  = process.env.CLAUDE_PROJECT_DIR || path.resolve(__dirname, '..');
 const BLOG_DIR     = path.join(PROJECT_DIR, 'src', 'blog');
-const TWEET_SOP    = path.join(PROJECT_DIR, '.claude', 'tweet-sop.md');
+const TWEET_SOP     = path.join(PROJECT_DIR, '.claude', 'tweet-sop.md');
+const LINKEDIN_SOP  = path.join(PROJECT_DIR, '.claude', 'linkedin-sop.md');
+const INSTAGRAM_SOP = path.join(PROJECT_DIR, '.claude', 'instagram-sop.md');
 const MAX_LEN      = 3800;
 const CLAUDE_MODEL = process.env.CLAUDE_MODEL || null;
 
 function cliArgs(args) {
   return CLAUDE_MODEL ? ['--model', CLAUDE_MODEL, ...args] : args;
 }
-function loadTweetSop() {
-  try { return fs.readFileSync(TWEET_SOP, 'utf8'); } catch (_) { return ''; }
-}
+function loadSop(file) { try { return fs.readFileSync(file, 'utf8'); } catch (_) { return ''; } }
 function tweetPrompt(context) {
-  const sop = loadTweetSop();
-  return sop
-    ? `${sop}\n\n---\n\nCONTEXT TO DRAW FROM:\n${context}`
-    : `Draft 3 tweet options. Voice: Bilal Meccai, DevOps engineer, direct, no fluff. Context:\n${context}`;
+  const sop = loadSop(TWEET_SOP);
+  return sop ? `${sop}\n\n---\n\nCONTEXT TO DRAW FROM:\n${context}` : `Draft 3 tweet options. Bilal Meccai, DevOps engineer, direct voice.\n${context}`;
+}
+function linkedinPrompt(context) {
+  const sop = loadSop(LINKEDIN_SOP);
+  return sop ? `${sop}\n\n---\n\nCONTEXT TO DRAW FROM:\n${context}` : `Write a LinkedIn post. Bilal Meccai, Senior DevOps Engineer. Professional, specific, no buzzwords.\n${context}`;
+}
+function instagramPrompt(context) {
+  const sop = loadSop(INSTAGRAM_SOP);
+  return sop ? `${sop}\n\n---\n\nCONTEXT TO DRAW FROM:\n${context}` : `Write an Instagram caption + visual prompt. Bilal Meccai, DevOps engineer. Simple, visual, punchy.\n${context}`;
+}
+
+// Split LinkedIn output: post text + optional Gemini visual prompt
+async function sendLinkedinPost(ctx, raw) {
+  const [post, visual] = raw.split(/={3,}VISUAL={3,}/i).map(s => s.trim());
+  if (post) await sendLong(ctx, post);
+  if (visual) {
+    await ctx.reply('*Gemini Carousel Prompt — copy & paste:*', { parse_mode: 'Markdown' });
+    await sendLong(ctx, `\`\`\`\n${visual}\n\`\`\``);
+  }
+}
+// Split Instagram output: caption + carousel prompt + story prompt
+async function sendInstagramPost(ctx, raw) {
+  const [caption, carouselRaw] = raw.split(/={3,}CAROUSEL={3,}/i).map(s => s.trim());
+  const [carousel, story] = (carouselRaw || '').split(/={3,}STORY={3,}/i).map(s => s.trim());
+  if (caption) await sendLong(ctx, `*Caption:*\n\n${caption}`, { parse_mode: 'Markdown' });
+  if (carousel) {
+    await ctx.reply('*Gemini Carousel Prompt — copy & paste:*', { parse_mode: 'Markdown' });
+    await sendLong(ctx, `\`\`\`\n${carousel}\n\`\`\``);
+  }
+  if (story) {
+    await ctx.reply('*Gemini Story Prompt — copy & paste:*', { parse_mode: 'Markdown' });
+    await sendLong(ctx, `\`\`\`\n${story}\n\`\`\``);
+  }
 }
 
 // ── Session store ─────────────────────────────────────────────────────────────
@@ -209,6 +239,17 @@ async function withBranch(ctx, label, actionFn) {
   return { ok: true, out: result.out, branched: true, branch, stat: statOut };
 }
 
+// Format picker keyboard for summarize
+function formatKeyboard(sid) {
+  return Markup.inlineKeyboard([
+    [Markup.button.callback('📝 Blog Post Draft',   `sum_blog:${sid}`)],
+    [Markup.button.callback('🐦 X / Twitter Post', `sum_tweet:${sid}`)],
+    [Markup.button.callback('💼 LinkedIn Post',     `sum_linkedin:${sid}`)],
+    [Markup.button.callback('📸 Instagram',         `sum_instagram:${sid}`)],
+    [Markup.button.callback('📋 Brief Summary',     `sum_brief:${sid}`)],
+  ]);
+}
+
 // Approval inline keyboard
 function approvalKeyboard(branch) {
   const b64 = Buffer.from(branch).toString('base64').slice(0, 60); // keep callback data short
@@ -226,6 +267,7 @@ function approvalKeyboard(branch) {
 
 const MAIN_KB = Markup.keyboard([
   ['📝 New Post',       '🐦 Tweet Draft'],
+  ['💼 LinkedIn Post',  '📸 Instagram'],
   ['📋 Blog Posts',     '✅ Pending Branches'],
   ['📊 Git Status',     '🔨 Build Site'],
   ['📂 Task List',      '🔄 Reset Session'],
@@ -600,7 +642,9 @@ async function runSummarize(ctx, sessionId, format) {
           `Do NOT include credentials, API keys, passwords, internal IPs, or confidential company names. ` +
           `Generalise employer/client details (e.g. "a US-based fintech platform" not "Markaaz").`,
 
-    tweet: null, // built dynamically via tweetPrompt()
+    tweet:     null, // built dynamically via tweetPrompt()
+    linkedin:  null, // built dynamically via linkedinPrompt()
+    instagram: null, // built dynamically via instagramPrompt()
 
     brief: `OUTPUT ONLY — do not write any files. ` +
            `Write a concise 2-3 paragraph plain-English summary of what was built or solved. ` +
@@ -611,10 +655,15 @@ async function runSummarize(ctx, sessionId, format) {
   const transcriptBlock = `CONVERSATION TRANSCRIPT (last 40 turns):\n\n${excerpt}`;
   const prompt = format === 'tweet'
     ? tweetPrompt(transcriptBlock)
+    : format === 'linkedin'
+    ? linkedinPrompt(transcriptBlock)
+    : format === 'instagram'
+    ? instagramPrompt(transcriptBlock)
     : `You are summarising a Claude Code conversation for content creation. ` +
       `${formatInstructions[format]}\n\n${transcriptBlock}`;
 
-  const label = format === 'blog' ? 'blog draft' : format === 'tweet' ? 'X posts' : 'summary';
+  const labelMap = { blog: 'blog draft', tweet: 'X posts', linkedin: 'LinkedIn post', instagram: 'Instagram content', brief: 'summary' };
+  const label = labelMap[format] || format;
   const placeholder = await ctx.reply(`⏳ Generating ${label}…`);
   const stop = keepTyping(ctx);
 
@@ -641,6 +690,24 @@ async function runSummarize(ctx, sessionId, format) {
     } else {
       await ctx.telegram.deleteMessage(ctx.chat.id, placeholder.message_id).catch(() => {});
       await sendTweetOptions(ctx, result.out);
+    }
+  } else if (format === 'linkedin') {
+    const result = await runCmd('claude', cliArgs(['-p', prompt]), { timeout: 300000 });
+    stop();
+    if (!result.ok) {
+      await editThenOverflow(ctx, placeholder.message_id, `❌ Error\n\`\`\`\n${result.out}\n\`\`\``);
+    } else {
+      await ctx.telegram.deleteMessage(ctx.chat.id, placeholder.message_id).catch(() => {});
+      await sendLinkedinPost(ctx, result.out);
+    }
+  } else if (format === 'instagram') {
+    const result = await runCmd('claude', cliArgs(['-p', prompt]), { timeout: 300000 });
+    stop();
+    if (!result.ok) {
+      await editThenOverflow(ctx, placeholder.message_id, `❌ Error\n\`\`\`\n${result.out}\n\`\`\``);
+    } else {
+      await ctx.telegram.deleteMessage(ctx.chat.id, placeholder.message_id).catch(() => {});
+      await sendInstagramPost(ctx, result.out);
     }
   } else {
     // brief: output only
@@ -670,11 +737,7 @@ bot.command('summarize', async (ctx) => {
     `*Summarise session*\n\`${sessionId}\`\n\nWhat do you want to generate?`,
     {
       parse_mode: 'Markdown',
-      ...Markup.inlineKeyboard([
-        [Markup.button.callback('📝 Blog Post Draft', `sum_blog:${sessionId}`)],
-        [Markup.button.callback('🐦 X / Twitter Post', `sum_tweet:${sessionId}`)],
-        [Markup.button.callback('📋 Brief Summary', `sum_brief:${sessionId}`)],
-      ]),
+      ...formatKeyboard(sessionId),
     }
   );
 });
@@ -694,16 +757,12 @@ bot.action(/^sum_pick:(.+)$/, async (ctx) => {
     `*Summarise session*\n\`${sid}\`\n\nWhat do you want to generate?`,
     {
       parse_mode: 'Markdown',
-      ...Markup.inlineKeyboard([
-        [Markup.button.callback('📝 Blog Post Draft',   `sum_blog:${sid}`)],
-        [Markup.button.callback('🐦 X / Twitter Post', `sum_tweet:${sid}`)],
-        [Markup.button.callback('📋 Brief Summary',    `sum_brief:${sid}`)],
-      ]),
+      ...formatKeyboard(sid),
     }
   );
 });
 
-bot.action(/^sum_(blog|tweet|brief):(.+)$/, async (ctx) => {
+bot.action(/^sum_(blog|tweet|brief|linkedin|instagram):(.+)$/, async (ctx) => {
   const format    = ctx.match[1];
   const sessionId = ctx.match[2];
   await ctx.answerCbQuery(`Generating ${format}…`).catch(() => {});
@@ -755,6 +814,32 @@ bot.command('draft', async (ctx) => {
   );
 });
 
+bot.command('linkedin', async (ctx) => {
+  const topic = ctx.message.text.replace('/linkedin', '').trim();
+  if (!topic) return ctx.reply('Usage: `/linkedin <topic or context>`', { parse_mode: 'Markdown' });
+  await ctx.sendChatAction('typing');
+  const placeholder = await ctx.reply('💼 Drafting LinkedIn post…');
+  const stop = keepTyping(ctx);
+  const result = await runCmd('claude', cliArgs(['-p', linkedinPrompt(`Topic: "${topic}"`)]), { timeout: 180000 });
+  stop();
+  if (!result.ok) { await editThenOverflow(ctx, placeholder.message_id, `❌ Error\n\`\`\`\n${result.out}\n\`\`\``); return; }
+  await ctx.telegram.deleteMessage(ctx.chat.id, placeholder.message_id).catch(() => {});
+  await sendLinkedinPost(ctx, result.out);
+});
+
+bot.command('instagram', async (ctx) => {
+  const topic = ctx.message.text.replace('/instagram', '').trim();
+  if (!topic) return ctx.reply('Usage: `/instagram <topic or context>`', { parse_mode: 'Markdown' });
+  await ctx.sendChatAction('typing');
+  const placeholder = await ctx.reply('📸 Drafting Instagram content…');
+  const stop = keepTyping(ctx);
+  const result = await runCmd('claude', cliArgs(['-p', instagramPrompt(`Topic: "${topic}"`)]), { timeout: 180000 });
+  stop();
+  if (!result.ok) { await editThenOverflow(ctx, placeholder.message_id, `❌ Error\n\`\`\`\n${result.out}\n\`\`\``); return; }
+  await ctx.telegram.deleteMessage(ctx.chat.id, placeholder.message_id).catch(() => {});
+  await sendInstagramPost(ctx, result.out);
+});
+
 // ── Session commands ──────────────────────────────────────────────────────────
 
 bot.command('whoami', (ctx) =>
@@ -804,6 +889,12 @@ bot.on('text', async (ctx) => {
     if (pending === 'draft') {
       return bot.handleUpdate({ ...ctx.update, message: { ...ctx.message, text: `/draft ${text}` } });
     }
+    if (pending === 'linkedin') {
+      return bot.handleUpdate({ ...ctx.update, message: { ...ctx.message, text: `/linkedin ${text}` } });
+    }
+    if (pending === 'instagram') {
+      return bot.handleUpdate({ ...ctx.update, message: { ...ctx.message, text: `/instagram ${text}` } });
+    }
     if (pending === 'summarize') {
       const uuidRe = /^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$/i;
       const sid = text.toLowerCase() === 'current' ? getSession(chatId) : uuidRe.test(text) ? text : null;
@@ -812,11 +903,7 @@ bot.on('text', async (ctx) => {
         `*Summarise session*\n\`${sid}\`\n\nWhat do you want to generate?`,
         {
           parse_mode: 'Markdown',
-          ...Markup.inlineKeyboard([
-            [Markup.button.callback('📝 Blog Post Draft',    `sum_blog:${sid}`)],
-            [Markup.button.callback('🐦 X / Twitter Post',  `sum_tweet:${sid}`)],
-            [Markup.button.callback('📋 Brief Summary',     `sum_brief:${sid}`)],
-          ]),
+          ...formatKeyboard(sid),
         }
       );
     }
@@ -839,6 +926,14 @@ bot.on('text', async (ctx) => {
   if (text === '🔨 Build Site')      return bot.handleUpdate({ ...ctx.update, message: { ...ctx.message, text: '/build' } });
   if (text === '📂 Task List')       return bot.handleUpdate({ ...ctx.update, message: { ...ctx.message, text: '/todo' } });
   if (text === '🔄 Reset Session')   return bot.handleUpdate({ ...ctx.update, message: { ...ctx.message, text: '/reset' } });
+  if (text === '💼 LinkedIn Post') {
+    PENDING.set(chatId, 'linkedin');
+    return ctx.reply('LinkedIn post topic or paste context:', Markup.forceReply().selective());
+  }
+  if (text === '📸 Instagram') {
+    PENDING.set(chatId, 'instagram');
+    return ctx.reply('Instagram topic or paste context:', Markup.forceReply().selective());
+  }
   if (text === '✍️ Summarize Session') {
     const sessions = listAllSessions();
     if (!sessions.length) {
