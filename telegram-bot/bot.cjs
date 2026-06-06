@@ -679,16 +679,29 @@ bot.on('text', async (ctx) => {
   if (pending) {
     PENDING.delete(chatId);
     if (pending === 'newpost') {
-      ctx.message.text = `/newpost ${text}`;
       return bot.handleUpdate({ ...ctx.update, message: { ...ctx.message, text: `/newpost ${text}` } });
     }
     if (pending === 'tweet') {
-      ctx.message.text = `/tweet ${text}`;
       return bot.handleUpdate({ ...ctx.update, message: { ...ctx.message, text: `/tweet ${text}` } });
     }
     if (pending === 'draft') {
-      ctx.message.text = `/draft ${text}`;
       return bot.handleUpdate({ ...ctx.update, message: { ...ctx.message, text: `/draft ${text}` } });
+    }
+    if (pending === 'summarize') {
+      const uuidRe = /^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$/i;
+      const sid = text.toLowerCase() === 'current' ? getSession(chatId) : uuidRe.test(text) ? text : null;
+      if (!sid) return ctx.reply('Not a valid session ID. Send a UUID or type `current`.', { parse_mode: 'Markdown' });
+      return ctx.reply(
+        `*Summarise session*\n\`${sid}\`\n\nWhat do you want to generate?`,
+        {
+          parse_mode: 'Markdown',
+          ...Markup.inlineKeyboard([
+            [Markup.button.callback('📝 Blog Post Draft',    `sum_blog:${sid}`)],
+            [Markup.button.callback('🐦 X / Twitter Post',  `sum_tweet:${sid}`)],
+            [Markup.button.callback('📋 Brief Summary',     `sum_brief:${sid}`)],
+          ]),
+        }
+      );
     }
   }
 
@@ -709,7 +722,12 @@ bot.on('text', async (ctx) => {
   if (text === '🔨 Build Site')      return bot.handleUpdate({ ...ctx.update, message: { ...ctx.message, text: '/build' } });
   if (text === '📂 Task List')       return bot.handleUpdate({ ...ctx.update, message: { ...ctx.message, text: '/todo' } });
   if (text === '🔄 Reset Session')   return bot.handleUpdate({ ...ctx.update, message: { ...ctx.message, text: '/reset' } });
-  if (text === '✍️ Summarize Session') return bot.handleUpdate({ ...ctx.update, message: { ...ctx.message, text: '/summarize' } });
+  if (text === '✍️ Summarize Session') {
+    PENDING.set(chatId, 'summarize');
+    const current = getSession(chatId);
+    const hint = current ? `Active session: \`${current}\`\n\nPaste any session ID, or type \`current\` to use the active one.` : 'Paste a session ID (UUID):';
+    return ctx.reply(hint, { parse_mode: 'Markdown', ...Markup.forceReply().selective() });
+  }
   // ────────────────────────────────────────────────────────────────────────
 
   const existing = getSession(chatId);
