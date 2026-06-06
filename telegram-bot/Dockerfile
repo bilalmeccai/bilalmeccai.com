@@ -8,10 +8,10 @@ RUN npm install -g @anthropic-ai/claude-code
 
 WORKDIR /app
 
-COPY telegram-bot/package*.json ./
+COPY package*.json ./
 RUN npm install --production
 
-COPY telegram-bot/bot.cjs telegram-bot/start.sh ./
+COPY bot.cjs start.sh ./
 RUN chmod +x start.sh
 
 # Claude project dir — set to the cloned repo location in start.sh
