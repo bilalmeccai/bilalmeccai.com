@@ -1,6 +1,7 @@
 'use strict';
 
-require('dotenv').config({ path: require('path').join(__dirname, '.env') });
+const dotenvResult = require('dotenv').config({ path: require('path').join(__dirname, '.env') });
+const DOTENV_KEYS = new Set(Object.keys(dotenvResult.parsed || {}));
 
 const { Telegraf, Markup } = require('telegraf');
 const { spawn } = require('child_process');
@@ -96,9 +97,15 @@ async function editThenOverflow(ctx, msgId, text, extra = {}) {
 function runCmd(cmd, args = [], opts = {}) {
   return new Promise((resolve) => {
     let out = '';
+    const spawnEnv = { ...process.env, npm_config_update_notifier: 'false' };
+    // If ANTHROPIC_API_KEY wasn't set in our .env, strip it so Claude
+    // falls back to its stored OAuth credentials instead of a stale system key
+    if (cmd === 'claude' && !DOTENV_KEYS.has('ANTHROPIC_API_KEY')) {
+      delete spawnEnv.ANTHROPIC_API_KEY;
+    }
     const proc = spawn(cmd, args, {
       cwd: PROJECT_DIR,
-      env: { ...process.env, npm_config_update_notifier: 'false' },
+      env: spawnEnv,
       windowsHide: true,
       timeout: opts.timeout || 120000,
     });
