@@ -207,6 +207,7 @@ const MAIN_KB = Markup.keyboard([
   ['📋 Blog Posts',     '✅ Pending Branches'],
   ['📊 Git Status',     '🔨 Build Site'],
   ['📂 Task List',      '🔄 Reset Session'],
+  ['✍️ Summarize Session'],
 ]).resize();
 
 // Pending state for buttons that need a follow-up input
@@ -708,6 +709,7 @@ bot.on('text', async (ctx) => {
   if (text === '🔨 Build Site')      return bot.handleUpdate({ ...ctx.update, message: { ...ctx.message, text: '/build' } });
   if (text === '📂 Task List')       return bot.handleUpdate({ ...ctx.update, message: { ...ctx.message, text: '/todo' } });
   if (text === '🔄 Reset Session')   return bot.handleUpdate({ ...ctx.update, message: { ...ctx.message, text: '/reset' } });
+  if (text === '✍️ Summarize Session') return bot.handleUpdate({ ...ctx.update, message: { ...ctx.message, text: '/summarize' } });
   // ────────────────────────────────────────────────────────────────────────
 
   const existing = getSession(chatId);
