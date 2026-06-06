@@ -16,9 +16,14 @@ if (!BOT_TOKEN) { console.error('[Bot] TELEGRAM_BOT_TOKEN not set'); process.exi
 const ALLOWED_IDS = (process.env.TELEGRAM_ALLOWED_USER_IDS || '')
   .split(',').map(s => s.trim()).filter(Boolean).map(Number);
 
-const PROJECT_DIR = process.env.CLAUDE_PROJECT_DIR || path.resolve(__dirname, '..');
-const BLOG_DIR    = path.join(PROJECT_DIR, 'src', 'blog');
-const MAX_LEN     = 3800;
+const PROJECT_DIR  = process.env.CLAUDE_PROJECT_DIR || path.resolve(__dirname, '..');
+const BLOG_DIR     = path.join(PROJECT_DIR, 'src', 'blog');
+const MAX_LEN      = 3800;
+const CLAUDE_MODEL = process.env.CLAUDE_MODEL || null;
+
+function cliArgs(args) {
+  return CLAUDE_MODEL ? ['--model', CLAUDE_MODEL, ...args] : args;
+}
 
 // ── Session store ─────────────────────────────────────────────────────────────
 
@@ -368,7 +373,7 @@ bot.command('newpost', async (ctx) => {
   const { ok, out, branched, branch, stat } = await withBranch(ctx, title, async () => {
     const existing = getSession(ctx.chat.id);
     const beforeIds = sessionIdsInLog();
-    const args = existing ? ['--resume', existing, '-p', prompt] : ['-p', prompt];
+    const args = cliArgs(existing ? ['--resume', existing, '-p', prompt] : ['-p', prompt]);
     const result = await runCmd('claude', args, { timeout: 300000 });
     if (!existing) {
       await new Promise(r => setTimeout(r, 800));
@@ -554,7 +559,7 @@ async function runSummarize(ctx, sessionId, format) {
   const placeholder = await ctx.reply(`⏳ Generating ${format === 'blog' ? 'blog draft' : format === 'tweet' ? 'X posts' : 'summary'}…`);
   const stop = keepTyping(ctx);
 
-  const result = await runCmd('claude', ['-p', prompt], { timeout: 300000 });
+  const result = await runCmd('claude', cliArgs(['-p', prompt]), { timeout: 300000 });
   stop();
 
   await editThenOverflow(ctx, placeholder.message_id,
@@ -611,7 +616,7 @@ bot.command('tweet', async (ctx) => {
   const prompt = `Draft an X (Twitter) post for Bilal Meccai about: "${topic}". Format: observation → insight → implication. Voice: direct, sharp, no fluff, no humble bragging. Max 280 chars. No hashtags unless they add clear value.`;
   const existing = getSession(ctx.chat.id);
   const beforeIds = sessionIdsInLog();
-  const result = await runCmd('claude', existing ? ['--resume', existing, '-p', prompt] : ['-p', prompt], { timeout: 120000 });
+  const result = await runCmd('claude', cliArgs(existing ? ['--resume', existing, '-p', prompt] : ['-p', prompt]), { timeout: 120000 });
   if (!existing) { await new Promise(r => setTimeout(r, 800)); const sid = newSessionId(beforeIds); if (sid) setSession(ctx.chat.id, sid); }
   stop();
   await editThenOverflow(ctx, placeholder.message_id,
@@ -628,7 +633,7 @@ bot.command('draft', async (ctx) => {
   const prompt = `Create a detailed blog post outline for bilalmeccai.com on: "${topic}". Follow the frontmatter spec in .claude/CLAUDE.md. Include: title, subtitle, tldr, section headings, key points, FAQ questions, and suggested code examples or tables. Brand voice: direct, plain language, shows thinking.`;
   const existing = getSession(ctx.chat.id);
   const beforeIds = sessionIdsInLog();
-  const result = await runCmd('claude', existing ? ['--resume', existing, '-p', prompt] : ['-p', prompt], { timeout: 180000 });
+  const result = await runCmd('claude', cliArgs(existing ? ['--resume', existing, '-p', prompt] : ['-p', prompt]), { timeout: 180000 });
   if (!existing) { await new Promise(r => setTimeout(r, 800)); const sid = newSessionId(beforeIds); if (sid) setSession(ctx.chat.id, sid); }
   stop();
   await editThenOverflow(ctx, placeholder.message_id,
@@ -680,11 +685,11 @@ bot.on('text', async (ctx) => {
   const { ok, out, branched, branch, stat } = await withBranch(ctx, text.slice(0, 50), async () => {
     let result;
     if (existing) {
-      result = await runCmd('claude', ['--resume', existing, '-p', text], { timeout: 300000 });
+      result = await runCmd('claude', cliArgs(['--resume', existing, '-p', text]), { timeout: 300000 });
       if (!result.ok && result.out.toLowerCase().includes('not found')) {
         clearSession(chatId);
         const beforeIds = sessionIdsInLog();
-        result = await runCmd('claude', ['-p', text], { timeout: 300000 });
+        result = await runCmd('claude', cliArgs(['-p', text]), { timeout: 300000 });
         await new Promise(r => setTimeout(r, 800));
         const sid = newSessionId(beforeIds);
         if (sid) {
@@ -694,7 +699,7 @@ bot.on('text', async (ctx) => {
       }
     } else {
       const beforeIds = sessionIdsInLog();
-      result = await runCmd('claude', ['-p', text], { timeout: 300000 });
+      result = await runCmd('claude', cliArgs(['-p', text]), { timeout: 300000 });
       await new Promise(r => setTimeout(r, 800));
       const sid = newSessionId(beforeIds);
       if (sid) {
