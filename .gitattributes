@@ -1,0 +1,22 @@
+# Normalize line endings: store as LF in repo, checkout as native on each OS
+* text=auto eol=lf
+
+# Force LF for these regardless of OS
+*.js   text eol=lf
+*.cjs  text eol=lf
+*.mjs  text eol=lf
+*.njk  text eol=lf
+*.md   text eol=lf
+*.css  text eol=lf
+*.json text eol=lf
+*.yaml text eol=lf
+*.yml  text eol=lf
+*.sh   text eol=lf
+
+# Binary — no line-ending conversion
+*.png  binary
+*.jpg  binary
+*.jpeg binary
+*.ico  binary
+*.woff binary
+*.woff2 binary
