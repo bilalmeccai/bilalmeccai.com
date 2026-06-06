@@ -144,19 +144,19 @@ async function withBranch(ctx, label, actionFn) {
   // Run the actual work (Claude, file writes, etc.)
   const result = await actionFn(branch);
 
-  // Check if anything changed
-  const { out: diffStat } = await runCmd('git', ['diff', '--staged', '--stat']);
-  const { out: statusOut } = await runCmd('git', ['status', '--short']);
+  // Stage first, then check what's actually staged
+  await runCmd('git', ['add', '-A']);
+  // --quiet: exits 0 = nothing staged, exits 1 = something staged
+  const { ok: nothingStaged } = await runCmd('git', ['diff', '--cached', '--quiet']);
 
-  if (!statusOut.trim()) {
-    // Nothing changed — clean up branch
+  if (nothingStaged) {
+    // Nothing staged — clean up branch
     await ensureMain();
     await runCmd('git', ['branch', '-D', branch]);
     return { ok: result.ok, out: result.out, branched: false };
   }
 
   // Commit on branch
-  await runCmd('git', ['add', '-A']);
   const { ok: commitOk, out: commitOut } = await runCmd('git', ['commit', '-m', `feat: ${label}`]);
 
   if (!commitOk) {
