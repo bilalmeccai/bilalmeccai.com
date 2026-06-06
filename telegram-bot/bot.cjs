@@ -21,6 +21,7 @@ const BLOG_DIR     = path.join(PROJECT_DIR, 'src', 'blog');
 const TWEET_SOP     = path.join(PROJECT_DIR, '.claude', 'tweet-sop.md');
 const LINKEDIN_SOP  = path.join(PROJECT_DIR, '.claude', 'linkedin-sop.md');
 const INSTAGRAM_SOP = path.join(PROJECT_DIR, '.claude', 'instagram-sop.md');
+const REDDIT_SOP    = path.join(PROJECT_DIR, '.claude', 'reddit-sop.md');
 const MAX_LEN      = 3800;
 const CLAUDE_MODEL = process.env.CLAUDE_MODEL || null;
 
@@ -40,6 +41,10 @@ function instagramPrompt(context) {
   const sop = loadSop(INSTAGRAM_SOP);
   return sop ? `${sop}\n\n---\n\nCONTEXT TO DRAW FROM:\n${context}` : `Write an Instagram caption + visual prompt. Bilal Meccai, DevOps engineer. Simple, visual, punchy.\n${context}`;
 }
+function redditPrompt(context) {
+  const sop = loadSop(REDDIT_SOP);
+  return sop ? `${sop}\n\n---\n\nCONTEXT TO DRAW FROM:\n${context}` : `Write a Reddit post. Bilal Meccai, Senior DevOps Engineer. Community-first tone, adds value, links blog naturally.\n${context}`;
+}
 
 // Split LinkedIn output: post text + optional Gemini visual prompt
 async function sendLinkedinPost(ctx, raw) {
@@ -50,6 +55,19 @@ async function sendLinkedinPost(ctx, raw) {
     await sendLong(ctx, `\`\`\`\n${visual}\n\`\`\``);
   }
 }
+// Split Reddit output: title + body + subreddits + first comment
+async function sendRedditPost(ctx, raw) {
+  const titleMatch = raw.match(/^(.+?)(?:\n|===BODY===)/s);
+  const title = titleMatch ? titleMatch[1].trim() : '';
+  const [, bodyRaw] = raw.split(/={3,}BODY={3,}/i);
+  const [body, afterBody] = (bodyRaw || '').split(/={3,}SUBREDDITS={3,}/i).map(s => s.trim());
+  const [subreddits, comment] = (afterBody || '').split(/={3,}COMMENT={3,}/i).map(s => s.trim());
+  if (title) await ctx.reply(`*Reddit Post Title:*\n\`${title}\``, { parse_mode: 'Markdown' });
+  if (body) await sendLong(ctx, `*Post Body:*\n\n${body}`, { parse_mode: 'Markdown' });
+  if (subreddits) await ctx.reply(`*Suggested Subreddits:*\n${subreddits}`, { parse_mode: 'Markdown' });
+  if (comment) await ctx.reply(`*First Comment (post after submitting):*\n\n${comment}`, { parse_mode: 'Markdown' });
+}
+
 // Split Instagram output: caption + carousel prompt + story prompt
 async function sendInstagramPost(ctx, raw) {
   const [caption, carouselRaw] = raw.split(/={3,}CAROUSEL={3,}/i).map(s => s.trim());
@@ -246,6 +264,7 @@ function formatKeyboard(sid) {
     [Markup.button.callback('🐦 X / Twitter Post', `sum_tweet:${sid}`)],
     [Markup.button.callback('💼 LinkedIn Post',     `sum_linkedin:${sid}`)],
     [Markup.button.callback('📸 Instagram',         `sum_instagram:${sid}`)],
+    [Markup.button.callback('🔴 Reddit Post',       `sum_reddit:${sid}`)],
     [Markup.button.callback('📋 Brief Summary',     `sum_brief:${sid}`)],
   ]);
 }
@@ -267,7 +286,7 @@ function approvalKeyboard(branch) {
 
 const MAIN_KB = Markup.keyboard([
   ['📝 New Post',       '🐦 Tweet Draft'],
-  ['💼 LinkedIn Post',  '📸 Instagram'],
+  ['💼 LinkedIn Post',  '📸 Instagram',    '🔴 Reddit Post'],
   ['📋 Blog Posts',     '✅ Pending Branches'],
   ['📊 Git Status',     '🔨 Build Site'],
   ['📂 Task List',      '🔄 Reset Session'],
@@ -645,6 +664,7 @@ async function runSummarize(ctx, sessionId, format) {
     tweet:     null, // built dynamically via tweetPrompt()
     linkedin:  null, // built dynamically via linkedinPrompt()
     instagram: null, // built dynamically via instagramPrompt()
+    reddit:    null, // built dynamically via redditPrompt()
 
     brief: `OUTPUT ONLY — do not write any files. ` +
            `Write a concise 2-3 paragraph plain-English summary of what was built or solved. ` +
@@ -659,10 +679,12 @@ async function runSummarize(ctx, sessionId, format) {
     ? linkedinPrompt(transcriptBlock)
     : format === 'instagram'
     ? instagramPrompt(transcriptBlock)
+    : format === 'reddit'
+    ? redditPrompt(transcriptBlock)
     : `You are summarising a Claude Code conversation for content creation. ` +
       `${formatInstructions[format]}\n\n${transcriptBlock}`;
 
-  const labelMap = { blog: 'blog draft', tweet: 'X posts', linkedin: 'LinkedIn post', instagram: 'Instagram content', brief: 'summary' };
+  const labelMap = { blog: 'blog draft', tweet: 'X posts', linkedin: 'LinkedIn post', instagram: 'Instagram content', reddit: 'Reddit post', brief: 'summary' };
   const label = labelMap[format] || format;
   const placeholder = await ctx.reply(`⏳ Generating ${label}…`);
   const stop = keepTyping(ctx);
@@ -708,6 +730,15 @@ async function runSummarize(ctx, sessionId, format) {
     } else {
       await ctx.telegram.deleteMessage(ctx.chat.id, placeholder.message_id).catch(() => {});
       await sendInstagramPost(ctx, result.out);
+    }
+  } else if (format === 'reddit') {
+    const result = await runCmd('claude', cliArgs(['-p', prompt]), { timeout: 300000 });
+    stop();
+    if (!result.ok) {
+      await editThenOverflow(ctx, placeholder.message_id, `❌ Error\n\`\`\`\n${result.out}\n\`\`\``);
+    } else {
+      await ctx.telegram.deleteMessage(ctx.chat.id, placeholder.message_id).catch(() => {});
+      await sendRedditPost(ctx, result.out);
     }
   } else {
     // brief: output only
@@ -762,7 +793,7 @@ bot.action(/^sum_pick:(.+)$/, async (ctx) => {
   );
 });
 
-bot.action(/^sum_(blog|tweet|brief|linkedin|instagram):(.+)$/, async (ctx) => {
+bot.action(/^sum_(blog|tweet|brief|linkedin|instagram|reddit):(.+)$/, async (ctx) => {
   const format    = ctx.match[1];
   const sessionId = ctx.match[2];
   await ctx.answerCbQuery(`Generating ${format}…`).catch(() => {});
@@ -840,6 +871,19 @@ bot.command('instagram', async (ctx) => {
   await sendInstagramPost(ctx, result.out);
 });
 
+bot.command('reddit', async (ctx) => {
+  const topic = ctx.message.text.replace('/reddit', '').trim();
+  if (!topic) return ctx.reply('Usage: `/reddit <topic or context>`', { parse_mode: 'Markdown' });
+  await ctx.sendChatAction('typing');
+  const placeholder = await ctx.reply('🔴 Drafting Reddit post…');
+  const stop = keepTyping(ctx);
+  const result = await runCmd('claude', cliArgs(['-p', redditPrompt(`Topic: "${topic}"`)]), { timeout: 180000 });
+  stop();
+  if (!result.ok) { await editThenOverflow(ctx, placeholder.message_id, `❌ Error\n\`\`\`\n${result.out}\n\`\`\``); return; }
+  await ctx.telegram.deleteMessage(ctx.chat.id, placeholder.message_id).catch(() => {});
+  await sendRedditPost(ctx, result.out);
+});
+
 // ── Session commands ──────────────────────────────────────────────────────────
 
 bot.command('whoami', (ctx) =>
@@ -895,6 +939,9 @@ bot.on('text', async (ctx) => {
     if (pending === 'instagram') {
       return bot.handleUpdate({ ...ctx.update, message: { ...ctx.message, text: `/instagram ${text}` } });
     }
+    if (pending === 'reddit') {
+      return bot.handleUpdate({ ...ctx.update, message: { ...ctx.message, text: `/reddit ${text}` } });
+    }
     if (pending === 'summarize') {
       const uuidRe = /^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$/i;
       const sid = text.toLowerCase() === 'current' ? getSession(chatId) : uuidRe.test(text) ? text : null;
@@ -933,6 +980,10 @@ bot.on('text', async (ctx) => {
   if (text === '📸 Instagram') {
     PENDING.set(chatId, 'instagram');
     return ctx.reply('Instagram topic or paste context:', Markup.forceReply().selective());
+  }
+  if (text === '🔴 Reddit Post') {
+    PENDING.set(chatId, 'reddit');
+    return ctx.reply('Reddit post topic or paste context:', Markup.forceReply().selective());
   }
   if (text === '✍️ Summarize Session') {
     const sessions = listAllSessions();
