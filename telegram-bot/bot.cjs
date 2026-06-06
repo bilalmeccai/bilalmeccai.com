@@ -471,20 +471,27 @@ bot.command('build', async (ctx) => {
 
 // ── Summarize / content extraction ───────────────────────────────────────────
 
-// Parse all sessions from sessions.log → [{ date, id }] newest first
-function parseSessions() {
+// Scan all Claude Code projects under USERPROFILE/.claude/projects/ → [{ id, project, date, mtime }] newest first
+function listAllSessions(limit = 25) {
   try {
-    if (!fs.existsSync(SESSIONS_LOG)) return [];
-    const content = fs.readFileSync(SESSIONS_LOG, 'utf8');
-    const results = [];
-    let current = {};
-    for (const line of content.split('\n')) {
-      const dateM = line.match(/^\[(.+?)\]/);
-      if (dateM) { current = { date: dateM[1] }; continue; }
-      const idM = line.match(/Session ID\s*:\s*([a-f0-9-]{36})/i);
-      if (idM && current.date) { current.id = idM[1]; results.push({ ...current }); current = {}; }
+    const base = path.join(process.env.USERPROFILE || process.env.HOME || '', '.claude', 'projects');
+    if (!fs.existsSync(base)) return [];
+    const sessions = [];
+    for (const proj of fs.readdirSync(base)) {
+      const projDir = path.join(base, proj);
+      try {
+        if (!fs.statSync(projDir).isDirectory()) continue;
+        const projName = proj.replace(/^[A-Za-z]--/, '').replace(/--/g, '/').slice(-30);
+        for (const file of fs.readdirSync(projDir)) {
+          if (!file.endsWith('.jsonl')) continue;
+          const sessionId = file.replace('.jsonl', '');
+          if (!/^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$/.test(sessionId)) continue;
+          const stat = fs.statSync(path.join(projDir, file));
+          sessions.push({ id: sessionId, project: projName, date: stat.mtime.toISOString().slice(0, 10), mtime: stat.mtimeMs });
+        }
+      } catch (_) {}
     }
-    return results.reverse();
+    return sessions.sort((a, b) => b.mtime - a.mtime).slice(0, limit);
   } catch (_) { return []; }
 }
 
@@ -778,18 +785,19 @@ bot.on('text', async (ctx) => {
   if (text === '📂 Task List')       return bot.handleUpdate({ ...ctx.update, message: { ...ctx.message, text: '/todo' } });
   if (text === '🔄 Reset Session')   return bot.handleUpdate({ ...ctx.update, message: { ...ctx.message, text: '/reset' } });
   if (text === '✍️ Summarize Session') {
-    const sessions = parseSessions();
+    const sessions = listAllSessions();
     if (!sessions.length) {
       PENDING.set(chatId, 'summarize');
-      return ctx.reply('No sessions logged yet. Paste a session UUID:', Markup.forceReply().selective());
+      return ctx.reply('No Claude Code sessions found. Paste a session UUID:', Markup.forceReply().selective());
     }
     const current = getSession(chatId);
     const buttons = sessions.map(s => {
-      const label = `${s.date}  ${s.id.slice(0, 8)}…${s.id.slice(-4)}${s.id === current ? ' ◀ active' : ''}`;
+      const active = s.id === current ? ' ◀' : '';
+      const label = `${s.date}  ${s.project}  ${s.id.slice(0, 6)}…${active}`;
       return [Markup.button.callback(label, `sum_pick:${s.id}`)];
     });
-    buttons.push([Markup.button.callback('🔍 Other session (paste UUID)…', 'sum_manual')]);
-    return ctx.reply('*Choose a session to summarise:*', {
+    buttons.push([Markup.button.callback('🔍 Paste a UUID manually…', 'sum_manual')]);
+    return ctx.reply('*Choose a session to summarise:*\n_(most recent first, all projects)_', {
       parse_mode: 'Markdown',
       ...Markup.inlineKeyboard(buttons),
     });
