@@ -471,6 +471,23 @@ bot.command('build', async (ctx) => {
 
 // ── Summarize / content extraction ───────────────────────────────────────────
 
+// Parse all sessions from sessions.log → [{ date, id }] newest first
+function parseSessions() {
+  try {
+    if (!fs.existsSync(SESSIONS_LOG)) return [];
+    const content = fs.readFileSync(SESSIONS_LOG, 'utf8');
+    const results = [];
+    let current = {};
+    for (const line of content.split('\n')) {
+      const dateM = line.match(/^\[(.+?)\]/);
+      if (dateM) { current = { date: dateM[1] }; continue; }
+      const idM = line.match(/Session ID\s*:\s*([a-f0-9-]{36})/i);
+      if (idM && current.date) { current.id = idM[1]; results.push({ ...current }); current = {}; }
+    }
+    return results.reverse();
+  } catch (_) { return []; }
+}
+
 // Read the transcript path for a session from sessions.log
 function getTranscriptPath(sessionId) {
   try {
@@ -586,6 +603,23 @@ bot.command('summarize', async (ctx) => {
         [Markup.button.callback('📝 Blog Post Draft', `sum_blog:${sessionId}`)],
         [Markup.button.callback('🐦 X / Twitter Post', `sum_tweet:${sessionId}`)],
         [Markup.button.callback('📋 Brief Summary', `sum_brief:${sessionId}`)],
+      ]),
+    }
+  );
+});
+
+// Session picker → show format buttons
+bot.action(/^sum_pick:(.+)$/, async (ctx) => {
+  const sid = ctx.match[1];
+  await ctx.answerCbQuery();
+  await ctx.editMessageText(
+    `*Summarise session*\n\`${sid}\`\n\nWhat do you want to generate?`,
+    {
+      parse_mode: 'Markdown',
+      ...Markup.inlineKeyboard([
+        [Markup.button.callback('📝 Blog Post Draft',   `sum_blog:${sid}`)],
+        [Markup.button.callback('🐦 X / Twitter Post', `sum_tweet:${sid}`)],
+        [Markup.button.callback('📋 Brief Summary',    `sum_brief:${sid}`)],
       ]),
     }
   );
@@ -723,10 +757,20 @@ bot.on('text', async (ctx) => {
   if (text === '📂 Task List')       return bot.handleUpdate({ ...ctx.update, message: { ...ctx.message, text: '/todo' } });
   if (text === '🔄 Reset Session')   return bot.handleUpdate({ ...ctx.update, message: { ...ctx.message, text: '/reset' } });
   if (text === '✍️ Summarize Session') {
-    PENDING.set(chatId, 'summarize');
+    const sessions = parseSessions();
+    if (!sessions.length) {
+      PENDING.set(chatId, 'summarize');
+      return ctx.reply('No sessions logged yet. Paste a session UUID:', Markup.forceReply().selective());
+    }
     const current = getSession(chatId);
-    const hint = current ? `Active session: \`${current}\`\n\nPaste any session ID, or type \`current\` to use the active one.` : 'Paste a session ID (UUID):';
-    return ctx.reply(hint, { parse_mode: 'Markdown', ...Markup.forceReply().selective() });
+    const buttons = sessions.map(s => {
+      const label = `${s.date}  ${s.id.slice(0, 8)}…${s.id.slice(-4)}${s.id === current ? ' ◀ active' : ''}`;
+      return [Markup.button.callback(label, `sum_pick:${s.id}`)];
+    });
+    return ctx.reply('*Choose a session to summarise:*', {
+      parse_mode: 'Markdown',
+      ...Markup.inlineKeyboard(buttons),
+    });
   }
   // ────────────────────────────────────────────────────────────────────────
 
