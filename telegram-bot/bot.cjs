@@ -200,6 +200,18 @@ function approvalKeyboard(branch) {
   ]);
 }
 
+// ── Reply keyboard ────────────────────────────────────────────────────────────
+
+const MAIN_KB = Markup.keyboard([
+  ['📝 New Post',       '🐦 Tweet Draft'],
+  ['📋 Blog Posts',     '✅ Pending Branches'],
+  ['📊 Git Status',     '🔨 Build Site'],
+  ['📂 Task List',      '🔄 Reset Session'],
+]).resize();
+
+// Pending state for buttons that need a follow-up input
+const PENDING = new Map(); // chatId → 'newpost' | 'tweet' | 'draft' | 'task'
+
 // ── Bot ───────────────────────────────────────────────────────────────────────
 
 const bot = new Telegraf(BOT_TOKEN);
@@ -213,24 +225,8 @@ bot.use(async (ctx, next) => {
 
 bot.command('start', async (ctx) => {
   await ctx.reply(
-    `*bilalmeccai.com* — remote control 🚀\n\n` +
-    `Every task runs on its own branch. Nothing merges to main without your approval.\n\n` +
-    `*Site*\n` +
-    `/posts — list blog posts\n` +
-    `/newpost <title> — scaffold + branch + approval gate\n` +
-    `/todo — P0–P3 task list\n` +
-    `/branches — pending approvals\n` +
-    `/deploy — commit current changes → approval gate\n` +
-    `/status — git status + recent commits\n` +
-    `/build — npm run build\n\n` +
-    `*Content*\n` +
-    `/tweet <topic> — draft X post\n` +
-    `/draft <topic> — blog post outline\n` +
-    `/summarize — turn this conversation into a blog/tweet/summary\n\n` +
-    `*Session*\n` +
-    `/session · /use <id> · /reset\n\n` +
-    `*Any other message* → Claude task on a branch → approval gate`,
-    { parse_mode: 'Markdown' }
+    `*bilalmeccai.com* — remote control\n\nUse the buttons below or just type a task. Everything runs on a branch — nothing ships without your approval.`,
+    { parse_mode: 'Markdown', ...MAIN_KB }
   );
 });
 
@@ -672,10 +668,48 @@ bot.command('log', async (ctx) => {
 // ── Main handler — Claude task on a branch ────────────────────────────────────
 
 bot.on('text', async (ctx) => {
-  const text = ctx.message.text.trim();
+  const text   = ctx.message.text.trim();
+  const chatId = ctx.chat.id;
   if (text.startsWith('/')) return;
 
-  const chatId   = ctx.chat.id;
+  // ── Keyboard button routing ──────────────────────────────────────────────
+  const pending = PENDING.get(chatId);
+
+  if (pending) {
+    PENDING.delete(chatId);
+    if (pending === 'newpost') {
+      ctx.message.text = `/newpost ${text}`;
+      return bot.handleUpdate({ ...ctx.update, message: { ...ctx.message, text: `/newpost ${text}` } });
+    }
+    if (pending === 'tweet') {
+      ctx.message.text = `/tweet ${text}`;
+      return bot.handleUpdate({ ...ctx.update, message: { ...ctx.message, text: `/tweet ${text}` } });
+    }
+    if (pending === 'draft') {
+      ctx.message.text = `/draft ${text}`;
+      return bot.handleUpdate({ ...ctx.update, message: { ...ctx.message, text: `/draft ${text}` } });
+    }
+  }
+
+  // Button taps that need follow-up input
+  if (text === '📝 New Post') {
+    PENDING.set(chatId, 'newpost');
+    return ctx.reply('Post title?', Markup.forceReply().selective());
+  }
+  if (text === '🐦 Tweet Draft') {
+    PENDING.set(chatId, 'tweet');
+    return ctx.reply('Tweet topic?', Markup.forceReply().selective());
+  }
+
+  // Button taps that run directly
+  if (text === '📋 Blog Posts')      return bot.handleUpdate({ ...ctx.update, message: { ...ctx.message, text: '/posts' } });
+  if (text === '✅ Pending Branches') return bot.handleUpdate({ ...ctx.update, message: { ...ctx.message, text: '/branches' } });
+  if (text === '📊 Git Status')      return bot.handleUpdate({ ...ctx.update, message: { ...ctx.message, text: '/status' } });
+  if (text === '🔨 Build Site')      return bot.handleUpdate({ ...ctx.update, message: { ...ctx.message, text: '/build' } });
+  if (text === '📂 Task List')       return bot.handleUpdate({ ...ctx.update, message: { ...ctx.message, text: '/todo' } });
+  if (text === '🔄 Reset Session')   return bot.handleUpdate({ ...ctx.update, message: { ...ctx.message, text: '/reset' } });
+  // ────────────────────────────────────────────────────────────────────────
+
   const existing = getSession(chatId);
 
   await ctx.sendChatAction('typing');
