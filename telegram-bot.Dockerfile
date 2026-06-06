@@ -17,6 +17,15 @@ RUN <<'EOF' sh
 cat > /app/start.sh << 'SCRIPT'
 #!/bin/sh
 set -e
+
+# Debug: print which required env vars are present (names only, no values)
+echo "[env] TELEGRAM_BOT_TOKEN    = $([ -n "$TELEGRAM_BOT_TOKEN" ] && echo SET || echo MISSING)"
+echo "[env] TELEGRAM_ALLOWED_USER_IDS = $([ -n "$TELEGRAM_ALLOWED_USER_IDS" ] && echo SET || echo MISSING)"
+echo "[env] ANTHROPIC_API_KEY     = $([ -n "$ANTHROPIC_API_KEY" ] && echo SET || echo MISSING)"
+echo "[env] GITHUB_TOKEN          = $([ -n "$GITHUB_TOKEN" ] && echo SET || echo MISSING)"
+echo "[env] GITHUB_REPO           = ${GITHUB_REPO:-bilalmeccai/bilalmeccai.com}"
+echo "[env] RAILWAY_ENVIRONMENT   = ${RAILWAY_ENVIRONMENT:-not set}"
+
 REPO="${GITHUB_REPO:-bilalmeccai/bilalmeccai.com}"
 REPO_URL="https://x-access-token:${GITHUB_TOKEN}@github.com/${REPO}.git"
 echo "[start] Cloning ${REPO}..."
