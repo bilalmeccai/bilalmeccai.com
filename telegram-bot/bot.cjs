@@ -117,7 +117,11 @@ function runCmd(cmd, args = [], opts = {}) {
       timeout: opts.timeout || 120000,
     });
     proc.stdout.on('data', d => { out += d; });
-    proc.stderr.on('data', d => { out += d; });
+    proc.stderr.on('data', d => {
+      const s = String(d);
+      // Suppress known noisy Claude warnings from appearing in bot output
+      if (!s.includes('no stdin data received') && !s.includes('SessionEnd hook') && !s.includes('hook-handler')) out += s;
+    });
     proc.on('close', code => resolve({ ok: code === 0, out: out.trim() || '(no output)' }));
     proc.on('error', err  => resolve({ ok: false, out: err.message }));
   });
@@ -250,7 +254,7 @@ bot.command('help', (ctx) => ctx.reply(
 
 bot.action(/^approve:(.+)$/, async (ctx) => {
   const branch = ctx.match[1];
-  await ctx.answerCbQuery('Merging to main…');
+  await ctx.answerCbQuery('Merging to main…').catch(() => {});
 
   const stop = keepTyping(ctx);
 
@@ -278,7 +282,7 @@ bot.action(/^approve:(.+)$/, async (ctx) => {
 
 bot.action(/^diff:(.+)$/, async (ctx) => {
   const branch = ctx.match[1];
-  await ctx.answerCbQuery();
+  await ctx.answerCbQuery().catch(() => {});
   const { out } = await runCmd('git', ['diff', `main...${branch}`, '--stat']);
   const { out: preview } = await runCmd('git', ['diff', `main...${branch}`, '--', '*.md', '*.njk', '*.css', '*.js']);
   const text = `*Diff: \`${branch}\`*\n\`\`\`\n${out}\n\`\`\`\n\`\`\`diff\n${preview.slice(0, 2000)}\n\`\`\``;
@@ -287,7 +291,7 @@ bot.action(/^diff:(.+)$/, async (ctx) => {
 
 bot.action(/^reject:(.+)$/, async (ctx) => {
   const branch = ctx.match[1];
-  await ctx.answerCbQuery('Rejected');
+  await ctx.answerCbQuery('Rejected').catch(() => {});
   await ensureMain();
   await runCmd('git', ['branch', '-D', branch]);
   removeApproval(branch);
@@ -652,7 +656,7 @@ bot.command('summarize', async (ctx) => {
 
 // "Other session" → prompt for UUID (searches all Claude projects)
 bot.action('sum_manual', async (ctx) => {
-  await ctx.answerCbQuery();
+  await ctx.answerCbQuery().catch(() => {});
   PENDING.set(ctx.chat.id, 'summarize');
   await ctx.reply('Paste the session UUID — I\'ll search across all your Claude Code projects:', Markup.forceReply().selective());
 });
@@ -660,7 +664,7 @@ bot.action('sum_manual', async (ctx) => {
 // Session picker → show format buttons
 bot.action(/^sum_pick:(.+)$/, async (ctx) => {
   const sid = ctx.match[1];
-  await ctx.answerCbQuery();
+  await ctx.answerCbQuery().catch(() => {});
   await ctx.editMessageText(
     `*Summarise session*\n\`${sid}\`\n\nWhat do you want to generate?`,
     {
@@ -677,7 +681,7 @@ bot.action(/^sum_pick:(.+)$/, async (ctx) => {
 bot.action(/^sum_(blog|tweet|brief):(.+)$/, async (ctx) => {
   const format    = ctx.match[1];
   const sessionId = ctx.match[2];
-  await ctx.answerCbQuery(`Generating ${format}…`);
+  await ctx.answerCbQuery(`Generating ${format}…`).catch(() => {});
   await ctx.editMessageText(`*Generating ${format}…*\n\`${sessionId}\``, { parse_mode: 'Markdown' }).catch(() => {});
   try {
     await runSummarize(ctx, sessionId, format);
