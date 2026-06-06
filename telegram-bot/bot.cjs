@@ -560,7 +560,7 @@ function readTranscriptExcerpt(transcriptPath, lastTurns = 40) {
 async function runSummarize(ctx, sessionId, format) {
   const transcriptPath = getTranscriptPath(sessionId);
   if (!transcriptPath || !fs.existsSync(transcriptPath)) {
-    await ctx.reply(`No transcript found for session \`${sessionId}\`.\nTranscripts are written when the SessionStart hook fires.`, { parse_mode: 'Markdown' });
+    await ctx.reply(`No transcript found for session \`${sessionId}\`.`, { parse_mode: 'Markdown' });
     return;
   }
 
@@ -571,17 +571,20 @@ async function runSummarize(ctx, sessionId, format) {
   }
 
   const formatInstructions = {
-    blog: `Write a complete, publish-ready blog post for bilalmeccai.com based on the work in this conversation. ` +
-          `Follow the frontmatter spec in .claude/CLAUDE.md. Use Bilal's voice: direct, sharp, no fluff, explains tech in plain language. ` +
+    blog: `Write a complete, publish-ready blog post for bilalmeccai.com. ` +
+          `Save it as a .md file in src/blog/ following the frontmatter spec in .claude/CLAUDE.md exactly. ` +
+          `Use Bilal's voice: direct, sharp, no fluff, explains tech in plain language. ` +
           `Show the thinking process and the "aha" moment. Include TL;DR, code examples, and FAQ section. ` +
-          `Do NOT include any credentials, API keys, passwords, internal IP addresses, or confidential company names. ` +
-          `Generalise any employer/client-specific details (e.g. "a US-based fintech platform" not "Markaaz").`,
+          `Do NOT include credentials, API keys, passwords, internal IPs, or confidential company names. ` +
+          `Generalise employer/client details (e.g. "a US-based fintech platform" not "Markaaz").`,
 
-    tweet: `Draft 3 X (Twitter) post options from the key insight in this conversation. ` +
+    tweet: `OUTPUT ONLY — do not write any files. ` +
+           `Draft 3 X (Twitter) post options from the key insight in this conversation. ` +
            `Format each: observation → insight → implication. Max 280 chars each. Direct, no fluff. ` +
            `Strip all sensitive info. Focus on the engineering insight, not the company context.`,
 
-    brief: `Write a concise 2-3 paragraph plain-English summary of what was built or solved in this conversation. ` +
+    brief: `OUTPUT ONLY — do not write any files. ` +
+           `Write a concise 2-3 paragraph plain-English summary of what was built or solved. ` +
            `Target audience: another senior engineer. Strip credentials, sensitive paths, company-specific names. ` +
            `Focus on: what the problem was, what approach was taken, what was the outcome.`,
   };
@@ -591,15 +594,33 @@ async function runSummarize(ctx, sessionId, format) {
     `${formatInstructions[format]}\n\n` +
     `CONVERSATION TRANSCRIPT (last 40 turns):\n\n${excerpt}`;
 
-  const placeholder = await ctx.reply(`⏳ Generating ${format === 'blog' ? 'blog draft' : format === 'tweet' ? 'X posts' : 'summary'}…`);
+  const label = format === 'blog' ? 'blog draft' : format === 'tweet' ? 'X posts' : 'summary';
+  const placeholder = await ctx.reply(`⏳ Generating ${label}…`);
   const stop = keepTyping(ctx);
 
-  const result = await runCmd('claude', cliArgs(['-p', prompt]), { timeout: 300000 });
-  stop();
-
-  await editThenOverflow(ctx, placeholder.message_id,
-    result.ok ? result.out : `❌ Error\n\`\`\`\n${result.out}\n\`\`\``
-  );
+  if (format === 'blog') {
+    // Blog: Claude writes a file → branch → approval gate
+    const { ok, out, branched, branch, stat } = await withBranch(ctx, `blog from session ${sessionId.slice(0, 8)}`, async () => {
+      return runCmd('claude', cliArgs(['--dangerously-skip-permissions', '-p', prompt]), { timeout: 300000 });
+    });
+    stop();
+    await editThenOverflow(ctx, placeholder.message_id,
+      ok ? `✅ *Blog post written*\n\n${out.slice(0, 1200)}` : `❌ Error\n\`\`\`\n${out}\n\`\`\``
+    );
+    if (branched) {
+      await ctx.reply(
+        `📋 *Changes on \`${branch}\`*\n\`\`\`\n${stat}\n\`\`\`\n\nApprove to merge → main → Vercel deploys.`,
+        { parse_mode: 'Markdown', ...approvalKeyboard(branch) }
+      );
+    }
+  } else {
+    // Tweet / brief: output only, no file writes
+    const result = await runCmd('claude', cliArgs(['-p', prompt]), { timeout: 300000 });
+    stop();
+    await editThenOverflow(ctx, placeholder.message_id,
+      result.ok ? result.out : `❌ Error\n\`\`\`\n${result.out}\n\`\`\``
+    );
+  }
 }
 
 // /summarize [session_id] — pick the format via inline buttons
@@ -654,14 +675,16 @@ bot.action(/^sum_pick:(.+)$/, async (ctx) => {
 });
 
 bot.action(/^sum_(blog|tweet|brief):(.+)$/, async (ctx) => {
-  const format    = ctx.match[1];          // blog | tweet | brief
+  const format    = ctx.match[1];
   const sessionId = ctx.match[2];
   await ctx.answerCbQuery(`Generating ${format}…`);
-  await ctx.editMessageText(
-    `*Summarising as ${format}…*\n\`${sessionId}\``,
-    { parse_mode: 'Markdown' }
-  );
-  await runSummarize(ctx, sessionId, format);
+  await ctx.editMessageText(`*Generating ${format}…*\n\`${sessionId}\``, { parse_mode: 'Markdown' }).catch(() => {});
+  try {
+    await runSummarize(ctx, sessionId, format);
+  } catch (err) {
+    console.error('[runSummarize error]', err.message);
+    await ctx.reply(`❌ Error: ${err.message}`).catch(() => {});
+  }
 });
 
 // ── Content commands ──────────────────────────────────────────────────────────
