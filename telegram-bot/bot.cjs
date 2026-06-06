@@ -18,11 +18,21 @@ const ALLOWED_IDS = (process.env.TELEGRAM_ALLOWED_USER_IDS || '')
 
 const PROJECT_DIR  = process.env.CLAUDE_PROJECT_DIR || path.resolve(__dirname, '..');
 const BLOG_DIR     = path.join(PROJECT_DIR, 'src', 'blog');
+const TWEET_SOP    = path.join(PROJECT_DIR, '.claude', 'tweet-sop.md');
 const MAX_LEN      = 3800;
 const CLAUDE_MODEL = process.env.CLAUDE_MODEL || null;
 
 function cliArgs(args) {
   return CLAUDE_MODEL ? ['--model', CLAUDE_MODEL, ...args] : args;
+}
+function loadTweetSop() {
+  try { return fs.readFileSync(TWEET_SOP, 'utf8'); } catch (_) { return ''; }
+}
+function tweetPrompt(context) {
+  const sop = loadTweetSop();
+  return sop
+    ? `${sop}\n\n---\n\nCONTEXT TO DRAW FROM:\n${context}`
+    : `Draft 3 tweet options. Voice: Bilal Meccai, DevOps engineer, direct, no fluff. Context:\n${context}`;
 }
 
 // ── Session store ─────────────────────────────────────────────────────────────
@@ -590,12 +600,7 @@ async function runSummarize(ctx, sessionId, format) {
           `Do NOT include credentials, API keys, passwords, internal IPs, or confidential company names. ` +
           `Generalise employer/client details (e.g. "a US-based fintech platform" not "Markaaz").`,
 
-    tweet: `OUTPUT ONLY — do not write any files. ` +
-           `Draft 3 X (Twitter) post options from the sharpest insight in this conversation. ` +
-           `Voice: Bilal Meccai — DevOps engineer, direct, no fluff, no humble-bragging, explains tech in plain language. ` +
-           `Format: observation → insight → implication. Max 280 chars each. No hashtags unless genuinely useful. ` +
-           `Strip all sensitive info and company names. ` +
-           `Output ONLY the tweet text. Separate each option with exactly "===TWEET===" on its own line. No labels, no char counts, no commentary.`,
+    tweet: null, // built dynamically via tweetPrompt()
 
     brief: `OUTPUT ONLY — do not write any files. ` +
            `Write a concise 2-3 paragraph plain-English summary of what was built or solved. ` +
@@ -603,10 +608,11 @@ async function runSummarize(ctx, sessionId, format) {
            `Focus on: what the problem was, what approach was taken, what was the outcome.`,
   };
 
-  const prompt =
-    `You are summarising a Claude Code conversation for content creation. ` +
-    `${formatInstructions[format]}\n\n` +
-    `CONVERSATION TRANSCRIPT (last 40 turns):\n\n${excerpt}`;
+  const transcriptBlock = `CONVERSATION TRANSCRIPT (last 40 turns):\n\n${excerpt}`;
+  const prompt = format === 'tweet'
+    ? tweetPrompt(transcriptBlock)
+    : `You are summarising a Claude Code conversation for content creation. ` +
+      `${formatInstructions[format]}\n\n${transcriptBlock}`;
 
   const label = format === 'blog' ? 'blog draft' : format === 'tweet' ? 'X posts' : 'summary';
   const placeholder = await ctx.reply(`⏳ Generating ${label}…`);
@@ -718,10 +724,7 @@ bot.command('tweet', async (ctx) => {
   await ctx.sendChatAction('typing');
   const placeholder = await ctx.reply('✍️ Drafting…');
   const stop = keepTyping(ctx);
-  const prompt = `Draft 3 X (Twitter) post options for Bilal Meccai about: "${topic}". ` +
-    `Voice: DevOps engineer — direct, sharp, no fluff, no humble-bragging, explains tech in plain language. ` +
-    `Format each: observation → insight → implication. Max 280 chars each. No hashtags unless genuinely useful. ` +
-    `Output ONLY the tweet text. Separate each option with exactly "===TWEET===" on its own line. No labels, no char counts, no commentary.`;
+  const prompt = tweetPrompt(`Topic: "${topic}"`);
   const existing = getSession(ctx.chat.id);
   const beforeIds = sessionIdsInLog();
   const result = await runCmd('claude', cliArgs(existing ? ['--resume', existing, '-p', prompt] : ['-p', prompt]), { timeout: 120000 });
