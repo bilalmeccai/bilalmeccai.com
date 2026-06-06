@@ -93,6 +93,14 @@ function splitText(text) {
 async function sendLong(ctx, text, extra = {}) {
   for (const part of splitText(text)) await ctx.reply(part, extra).catch(() => ctx.reply(part));
 }
+// Parse tweet options delimited by ===TWEET=== and send each as its own message
+async function sendTweetOptions(ctx, raw) {
+  const tweets = raw.split(/={3,}TWEET={3,}/i).map(t => t.trim()).filter(Boolean);
+  if (!tweets.length) { await ctx.reply(raw); return; }
+  for (let i = 0; i < tweets.length; i++) {
+    await ctx.reply(`*Option ${i + 1}*\n\n${tweets[i]}`, { parse_mode: 'Markdown' }).catch(() => ctx.reply(`Option ${i + 1}\n\n${tweets[i]}`));
+  }
+}
 async function editThenOverflow(ctx, msgId, text, extra = {}) {
   const [first, ...rest] = splitText(text);
   await ctx.telegram.editMessageText(ctx.chat.id, msgId, null, first, { parse_mode: 'Markdown', ...extra })
@@ -583,9 +591,11 @@ async function runSummarize(ctx, sessionId, format) {
           `Generalise employer/client details (e.g. "a US-based fintech platform" not "Markaaz").`,
 
     tweet: `OUTPUT ONLY — do not write any files. ` +
-           `Draft 3 X (Twitter) post options from the key insight in this conversation. ` +
-           `Format each: observation → insight → implication. Max 280 chars each. Direct, no fluff. ` +
-           `Strip all sensitive info. Focus on the engineering insight, not the company context.`,
+           `Draft 3 X (Twitter) post options from the sharpest insight in this conversation. ` +
+           `Voice: Bilal Meccai — DevOps engineer, direct, no fluff, no humble-bragging, explains tech in plain language. ` +
+           `Format: observation → insight → implication. Max 280 chars each. No hashtags unless genuinely useful. ` +
+           `Strip all sensitive info and company names. ` +
+           `Output ONLY the tweet text. Separate each option with exactly "===TWEET===" on its own line. No labels, no char counts, no commentary.`,
 
     brief: `OUTPUT ONLY — do not write any files. ` +
            `Write a concise 2-3 paragraph plain-English summary of what was built or solved. ` +
@@ -617,8 +627,17 @@ async function runSummarize(ctx, sessionId, format) {
         { parse_mode: 'Markdown', ...approvalKeyboard(branch) }
       );
     }
+  } else if (format === 'tweet') {
+    const result = await runCmd('claude', cliArgs(['-p', prompt]), { timeout: 300000 });
+    stop();
+    if (!result.ok) {
+      await editThenOverflow(ctx, placeholder.message_id, `❌ Error\n\`\`\`\n${result.out}\n\`\`\``);
+    } else {
+      await ctx.telegram.deleteMessage(ctx.chat.id, placeholder.message_id).catch(() => {});
+      await sendTweetOptions(ctx, result.out);
+    }
   } else {
-    // Tweet / brief: output only, no file writes
+    // brief: output only
     const result = await runCmd('claude', cliArgs(['-p', prompt]), { timeout: 300000 });
     stop();
     await editThenOverflow(ctx, placeholder.message_id,
@@ -699,15 +718,21 @@ bot.command('tweet', async (ctx) => {
   await ctx.sendChatAction('typing');
   const placeholder = await ctx.reply('✍️ Drafting…');
   const stop = keepTyping(ctx);
-  const prompt = `Draft an X (Twitter) post for Bilal Meccai about: "${topic}". Format: observation → insight → implication. Voice: direct, sharp, no fluff, no humble bragging. Max 280 chars. No hashtags unless they add clear value.`;
+  const prompt = `Draft 3 X (Twitter) post options for Bilal Meccai about: "${topic}". ` +
+    `Voice: DevOps engineer — direct, sharp, no fluff, no humble-bragging, explains tech in plain language. ` +
+    `Format each: observation → insight → implication. Max 280 chars each. No hashtags unless genuinely useful. ` +
+    `Output ONLY the tweet text. Separate each option with exactly "===TWEET===" on its own line. No labels, no char counts, no commentary.`;
   const existing = getSession(ctx.chat.id);
   const beforeIds = sessionIdsInLog();
   const result = await runCmd('claude', cliArgs(existing ? ['--resume', existing, '-p', prompt] : ['-p', prompt]), { timeout: 120000 });
   if (!existing) { await new Promise(r => setTimeout(r, 800)); const sid = newSessionId(beforeIds); if (sid) setSession(ctx.chat.id, sid); }
   stop();
-  await editThenOverflow(ctx, placeholder.message_id,
-    result.ok ? `*X Post Draft*\n\n${result.out}` : `❌ Error\n\`\`\`\n${result.out}\n\`\`\``
-  );
+  if (!result.ok) {
+    await editThenOverflow(ctx, placeholder.message_id, `❌ Error\n\`\`\`\n${result.out}\n\`\`\``);
+  } else {
+    await ctx.telegram.deleteMessage(ctx.chat.id, placeholder.message_id).catch(() => {});
+    await sendTweetOptions(ctx, result.out);
+  }
 });
 
 bot.command('draft', async (ctx) => {
