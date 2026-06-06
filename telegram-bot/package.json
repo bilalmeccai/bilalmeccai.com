@@ -1,0 +1,17 @@
+{
+  "name": "bilal-telegram-bot",
+  "version": "1.0.0",
+  "private": true,
+  "main": "bot.cjs",
+  "scripts": {
+    "start": "node bot.cjs",
+    "pm2:start": "pm2 start pm2.config.cjs",
+    "pm2:stop": "pm2 stop bilal-telegram-bot",
+    "pm2:logs": "pm2 logs bilal-telegram-bot",
+    "pm2:save": "pm2 save && pm2 startup"
+  },
+  "dependencies": {
+    "dotenv": "^16.4.5",
+    "telegraf": "^4.16.3"
+  }
+}

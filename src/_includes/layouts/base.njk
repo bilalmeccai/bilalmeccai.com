@@ -1,0 +1,88 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+<meta name="description" content="{{ description or 'Mohammed Bilal Meccai — Senior DevOps Engineer who turns complex infrastructure chaos into clean, working systems.' }}">
+<meta name="author" content="Mohammed Bilal Meccai">
+<meta name="robots" content="index, follow">
+<link rel="canonical" href="https://bilalmeccai.com{{ page.url }}">
+
+<!-- Open Graph -->
+<meta property="og:title"       content="{{ title or 'Mohammed Bilal Meccai — Senior DevOps Engineer' }}">
+<meta property="og:description" content="{{ description or 'I turn complex infrastructure chaos into clean, working systems.' }}">
+<meta property="og:url"         content="https://bilalmeccai.com{{ page.url }}">
+<meta property="og:type"        content="{{ ogType or 'website' }}">
+<meta property="og:site_name"   content="Bilal Meccai">
+
+<!-- Twitter -->
+<meta name="twitter:card"        content="summary_large_image">
+<meta name="twitter:title"       content="{{ title or 'Mohammed Bilal Meccai' }}">
+<meta name="twitter:description" content="{{ description or 'I turn complex infrastructure chaos into clean, working systems.' }}">
+
+<title>{{ title or 'Mohammed Bilal Meccai — Senior DevOps Engineer' }}</title>
+
+<!-- Fonts -->
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Playfair+Display:ital,wght@0,400;0,700;1,400&family=DM+Sans:opsz,wght@9..40,300;9..40,400;9..40,500&family=DM+Mono:wght@400;500&display=swap" rel="stylesheet">
+
+<!-- Base styles — always loaded -->
+<link rel="stylesheet" href="/assets/css/base.css">
+
+<!-- Page-level extra styles -->
+{% block head %}{% endblock %}
+
+<!-- Schema markup slot -->
+{% block schema %}{% endblock %}
+</head>
+<body>
+
+<div class="cursor" id="cursor"></div>
+<div class="cursor-ring" id="cursorRing"></div>
+
+<!-- MOBILE MENU -->
+<div class="mobile-menu" id="mobileMenu" aria-hidden="true">
+  <a href="/">Home</a>
+  <a href="/blog/">Writing</a>
+  <a href="/#work">Work</a>
+  <a href="/#stack">Stack</a>
+  <a href="/#contact" class="mobile-cta">Work With Me</a>
+</div>
+
+<!-- NAV -->
+<nav class="site-nav" id="siteNav">
+  <a href="/" class="nav__logo">Bilal<span>.</span></a>
+  <ul class="nav__links">
+    <li><a href="/" {% if page.url == '/' %}aria-current="page"{% endif %}>Home</a></li>
+    <li><a href="/blog/" {% if page.url.startsWith('/blog') %}aria-current="page"{% endif %}>Writing</a></li>
+    <li><a href="/#work">Work</a></li>
+    <li><a href="/#stack">Stack</a></li>
+  </ul>
+  <a href="/#contact" class="nav__cta">Work With Me</a>
+  <button class="nav__hamburger" id="navHamburger" aria-label="Menu" aria-expanded="false">
+    <span></span><span></span><span></span>
+  </button>
+</nav>
+
+<!-- PAGE CONTENT -->
+<main id="main">
+  {% block content %}{% endblock %}
+</main>
+
+<!-- FOOTER -->
+<footer class="site-footer">
+  <div class="footer__logo">Bilal<span>.</span></div>
+  <ul class="footer__links">
+    <li><a href="https://x.com/" target="_blank" rel="noopener">X / Twitter</a></li>
+    <li><a href="https://linkedin.com/in/bilal-meccai-a3b6a7168" target="_blank" rel="noopener">LinkedIn</a></li>
+    <li><a href="/blog/">Writing</a></li>
+    <li><a href="mailto:bilalmeccai@gmail.com">Email</a></li>
+  </ul>
+  <div class="footer__copy">© {% year %} Mohammed Bilal Meccai</div>
+</footer>
+
+<script src="/assets/js/main.js" defer></script>
+{% block scripts %}{% endblock %}
+</body>
+</html>

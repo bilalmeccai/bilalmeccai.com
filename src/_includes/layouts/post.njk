@@ -1,0 +1,137 @@
+{% extends "layouts/base.njk" %}
+
+{% block head %}
+<link rel="stylesheet" href="/assets/css/blog.css">
+<style>
+  /* copy-btn style injected here so it works with pre blocks */
+  .copy-btn {
+    position: absolute;
+    top: 10px; right: 12px;
+    font-family: var(--mono);
+    font-size: 0.58rem;
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
+    color: rgba(255,255,255,0.4);
+    background: none;
+    border: 1px solid rgba(255,255,255,0.12);
+    padding: 4px 10px;
+    cursor: pointer;
+    transition: color 0.2s, border-color 0.2s;
+  }
+  .copy-btn:hover { color: rgba(255,255,255,0.8); border-color: rgba(255,255,255,0.3); }
+  .copy-btn.copied { color: #3fb950; border-color: #3fb950; }
+</style>
+{% endblock %}
+
+{% block schema %}
+<script type="application/ld+json">
+{
+  "@context": "https://schema.org",
+  "@type": "TechArticle",
+  "headline": "{{ title }}",
+  "description": "{{ description }}",
+  "author": {
+    "@type": "Person",
+    "name": "Mohammed Bilal Meccai",
+    "url": "https://bilalmeccai.com"
+  },
+  "publisher": {
+    "@type": "Person",
+    "name": "Mohammed Bilal Meccai",
+    "url": "https://bilalmeccai.com"
+  },
+  "datePublished": "{{ page.date | dateISO }}",
+  "dateModified":  "{{ page.date | dateISO }}",
+  "mainEntityOfPage": "https://bilalmeccai.com{{ page.url }}",
+  "keywords": {{ tags | dump }},
+  "articleSection": "{{ category or 'DevOps & Engineering' }}"
+}
+</script>
+
+{% if faq %}
+<script type="application/ld+json">
+{
+  "@context": "https://schema.org",
+  "@type": "FAQPage",
+  "mainEntity": [
+    {% for item in faq %}
+    {
+      "@type": "Question",
+      "name": "{{ item.q }}",
+      "acceptedAnswer": { "@type": "Answer", "text": "{{ item.a }}" }
+    }{% if not loop.last %},{% endif %}
+    {% endfor %}
+  ]
+}
+</script>
+{% endif %}
+{% endblock %}
+
+{% block content %}
+<div class="post-wrap">
+
+  <!-- POST HERO -->
+  <header class="post-hero">
+    <div class="post-hero__meta">
+      {% for tag in tags %}
+        {% if tag != 'posts' %}
+          <span class="post-hero__tag">{{ tag }}</span>
+        {% endif %}
+      {% endfor %}
+      <span class="post-hero__read">{{ content | readingTime }} min read</span>
+    </div>
+
+    <h1 class="post-hero__title">{{ title }}</h1>
+
+    {% if subtitle %}
+      <p class="post-hero__subtitle">{{ subtitle }}</p>
+    {% endif %}
+
+    <div class="post-hero__author">
+      <div class="author-avatar">B</div>
+      <div>
+        <div class="author-name">Mohammed Bilal Meccai</div>
+        <div class="author-date">{{ page.date | dateDisplay }} · Senior DevOps Engineer</div>
+      </div>
+    </div>
+  </header>
+
+  <!-- TL;DR (if provided in frontmatter) -->
+  {% if tldr %}
+  <div class="tldr">
+    <div class="tldr__box">
+      <div class="tldr__label">TL;DR</div>
+      <div class="tldr__body">{{ tldr | safe }}</div>
+    </div>
+  </div>
+  {% endif %}
+
+  <!-- ARTICLE BODY -->
+  <article class="post-body">
+    {{ content | safe }}
+
+    <!-- AUTHOR CARD -->
+    <div class="author-card">
+      <div class="author-card__avatar">B</div>
+      <div>
+        <div class="author-card__name">Mohammed Bilal Meccai</div>
+        <div class="author-card__role">Senior DevOps Engineer · Systems Thinker</div>
+        <p class="author-card__bio">
+          I turn complex infrastructure chaos into clean, working systems — production ELT pipelines, cloud cost optimisation, AI-native DevOps tooling. I write about the real problems I solve and the patterns I find in systems others miss.
+          <br><br>
+          <a href="https://bilalmeccai.com">bilalmeccai.com</a> ·
+          <a href="mailto:bilalmeccai@gmail.com">bilalmeccai@gmail.com</a>
+        </p>
+      </div>
+    </div>
+
+    <!-- POST CTA -->
+    <div class="post-cta">
+      <div class="post-cta__label">Got an infrastructure problem?</div>
+      <div class="post-cta__title">I solve these kinds of problems fast.<br>Let's talk about yours.</div>
+      <a href="/#contact" class="post-cta__btn">Work With Me →</a>
+    </div>
+  </article>
+
+</div>
+{% endblock %}

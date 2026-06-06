@@ -1,23 +1,21 @@
 {
-  "version": 2,
-  "builds": [
-    { "src": "index.html", "use": "@vercel/static" }
-  ],
-  "routes": [
-    { "src": "/(.*)", "dest": "/index.html" }
-  ],
+  "buildCommand": "npm run build",
+  "outputDirectory": "_site",
+  "installCommand": "npm install",
+  "framework": null,
   "headers": [
     {
       "source": "/(.*)",
       "headers": [
-        { "key": "X-Content-Type-Options", "value": "nosniff" },
-        { "key": "X-Frame-Options", "value": "DENY" },
-        { "key": "X-XSS-Protection", "value": "1; mode=block" },
-        { "key": "Referrer-Policy", "value": "strict-origin-when-cross-origin" }
+        { "key": "X-Content-Type-Options",            "value": "nosniff" },
+        { "key": "X-Frame-Options",                   "value": "DENY" },
+        { "key": "X-XSS-Protection",                  "value": "1; mode=block" },
+        { "key": "Referrer-Policy",                   "value": "strict-origin-when-cross-origin" },
+        { "key": "Permissions-Policy",                "value": "camera=(), microphone=(), geolocation=()" }
       ]
     },
     {
-      "source": "/(.*)\\.(css|js|png|jpg|jpeg|svg|ico|woff2)",
+      "source": "/assets/(.*)",
       "headers": [
         { "key": "Cache-Control", "value": "public, max-age=31536000, immutable" }
       ]

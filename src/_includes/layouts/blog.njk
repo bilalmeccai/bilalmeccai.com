@@ -1,0 +1,38 @@
+{% extends "layouts/base.njk" %}
+
+{% block head %}
+<link rel="stylesheet" href="/assets/css/blog.css">
+{% endblock %}
+
+{% block content %}
+
+<div class="blog-hero reveal">
+  <div class="section-label blog-hero__label">Writing</div>
+  <h1 class="blog-hero__title">Systems I've <em>decoded.</em><br>Problems I've fixed.</h1>
+  <p class="blog-hero__sub">Real engineering posts — no fluff. Each one is a problem I actually solved, with the exact fix documented so you don't spend 3 hours on what took me 60 seconds.</p>
+</div>
+
+<div class="blog-grid">
+  {% for post in collections.posts %}
+  <a href="{{ post.url }}" class="post-card reveal">
+    <div>
+      <div class="post-card__meta">
+        {% for tag in post.data.tags %}
+          {% if tag != 'posts' %}
+            <span class="post-card__tag">{{ tag }}</span>
+          {% endif %}
+        {% endfor %}
+        <span class="post-card__date">{{ post.date | dateDisplay }}</span>
+        <span class="post-card__read">{{ post.content | readingTime }} min read</span>
+      </div>
+      <h2 class="post-card__title">{{ post.data.title }}</h2>
+      <p class="post-card__excerpt">{{ post.data.description or (post.content | excerpt) }}</p>
+    </div>
+    <span class="post-card__arrow">→</span>
+  </a>
+  {% else %}
+  <p style="color:var(--ink-muted);font-family:var(--mono);font-size:0.8rem;padding:40px 0;">No posts yet — first one coming soon.</p>
+  {% endfor %}
+</div>
+
+{% endblock %}
