@@ -98,9 +98,11 @@ function runCmd(cmd, args = [], opts = {}) {
   return new Promise((resolve) => {
     let out = '';
     const spawnEnv = { ...process.env, npm_config_update_notifier: 'false' };
-    // If ANTHROPIC_API_KEY wasn't set in our .env, strip it so Claude
-    // falls back to its stored OAuth credentials instead of a stale system key
-    if (cmd === 'claude' && !DOTENV_KEYS.has('ANTHROPIC_API_KEY')) {
+    // On local Windows, strip a stale system-level ANTHROPIC_API_KEY so Claude
+    // falls back to its stored OAuth credentials. Skip this on Railway/cloud —
+    // the key there was set intentionally via env vars and must be kept.
+    const onRailway = !!process.env.RAILWAY_ENVIRONMENT;
+    if (cmd === 'claude' && !onRailway && !DOTENV_KEYS.has('ANTHROPIC_API_KEY')) {
       delete spawnEnv.ANTHROPIC_API_KEY;
     }
     const proc = spawn(cmd, args, {
