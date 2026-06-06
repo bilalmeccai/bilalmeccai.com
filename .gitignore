@@ -13,6 +13,9 @@ telegram-bot/.env
 .DS_Store
 Thumbs.db
 
+# Railway runtime workspace
+/workspace/
+
 # Logs
 *.log
 
