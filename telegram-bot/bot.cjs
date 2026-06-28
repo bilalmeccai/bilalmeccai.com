@@ -698,7 +698,7 @@ async function runSummarize(ctx, sessionId, format) {
   if (format === 'blog') {
     // Blog: Claude writes a file → branch → approval gate
     const { ok, out, branched, branch, stat } = await withBranch(ctx, `blog from session ${sessionId.slice(0, 8)}`, async () => {
-      return runCmd('claude', cliArgs(['--dangerously-skip-permissions', '-p', prompt]), { timeout: 300000 });
+      return runCmd('claude', cliArgs(['-p', prompt]), { timeout: 300000 });
     });
     stop();
     await editThenOverflow(ctx, placeholder.message_id,

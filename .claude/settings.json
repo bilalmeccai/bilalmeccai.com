@@ -176,6 +176,10 @@
       "Bash(npx @claude-flow*)",
       "Bash(npx claude-flow*)",
       "Bash(node .claude/*)",
+      "Bash(git *)",
+      "Bash(npm *)",
+      "Write(src/**)",
+      "Edit(src/**)",
       "mcp__ruflo__*"
     ],
     "deny": [
