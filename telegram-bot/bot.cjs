@@ -307,12 +307,18 @@ bot.use(async (ctx, next) => {
 
 // ── /start & /help ────────────────────────────────────────────────────────────
 
-bot.command('start', async (ctx) => {
+const GREETING_RE = /^(hi|hello|hey|yo|sup|start|menu|help me|hii|helo|helo+)\s*[!.]*$/i;
+
+async function sendWelcome(ctx) {
   await ctx.reply(
     `*bilalmeccai.com* — remote control\n\nUse the buttons below or just type a task. Everything runs on a branch — nothing ships without your approval.`,
     { parse_mode: 'Markdown', ...MAIN_KB }
   );
-});
+}
+
+bot.command('start', sendWelcome);
+
+bot.hears(GREETING_RE, sendWelcome);
 
 bot.command('help', (ctx) => ctx.reply(
   `*Commands*\n\n` +
@@ -912,6 +918,99 @@ bot.command('log', async (ctx) => {
   await sendLong(ctx, `*Session Log*\n\`\`\`\n${content.slice(-3000)}\n\`\`\``, { parse_mode: 'Markdown' });
 });
 
+// ── Intent detection ─────────────────────────────────────────────────────────
+
+function detectIntent(text) {
+  const t = text.toLowerCase();
+  if (/\btweet\b|\bpost.*on\s+(twitter|x)\b|\bx\s+post\b/.test(t))          return 'tweet';
+  if (/\blinkedin\b/.test(t))                                                 return 'linkedin';
+  if (/\binstagram\b|\big\s+post\b|\bcarousel\b|\breels?\b/.test(t))         return 'instagram';
+  if (/\breddit\b|\bsubreddit\b/.test(t))                                     return 'reddit';
+  if (/\b(write|create|draft|new)\s+(a\s+)?blog\b|\bblog\s+(post|article)\b|\bnew\s+post\b/.test(t)) return 'newpost';
+  if (/\boutline\b|\bblog\s+draft\b|\bpost\s+outline\b/.test(t))             return 'draft';
+  if (/\b(git\s+)?status\b|\bwhat\s+(changed|modified)\b/.test(t))           return 'status';
+  if (/\b(run\s+)?build\b|\bnpm\s+build\b/.test(t))                          return 'build';
+  if (/\bpending\s+branches\b|\bapprovals\b/.test(t))                        return 'branches';
+  if (/\bsummariz\b|\bmy\s+session\b|\bthis\s+session\b/.test(t))           return 'summarize';
+  if (/\btodo\b|\btask\s+list\b|\bwhat.s\s+left\b|\bbacklog\b/.test(t))     return 'todo';
+  if (/\b(reset|clear)\s+session\b|\bfresh\s+start\b/.test(t))              return 'reset';
+  return null;
+}
+
+// ── Quick-action picker callbacks ─────────────────────────────────────────────
+
+bot.action(/^qa:(tweet|linkedin|instagram|reddit|newpost|draft|claude)$/, async (ctx) => {
+  const action = ctx.match[1];
+  await ctx.answerCbQuery().catch(() => {});
+  const stored = PENDING.get(ctx.chat.id);
+  const topic  = stored?.topic || '';
+  PENDING.delete(ctx.chat.id);
+
+  if (!topic) {
+    await ctx.editMessageText('Context lost — type your topic again.').catch(() => {});
+    return;
+  }
+
+  if (action === 'claude') {
+    await ctx.editMessageText(`🤖 Running as Claude task…`).catch(() => {});
+    await runClaudeTask(ctx, topic);
+    return;
+  }
+
+  await ctx.editMessageText(`Got it — generating ${action} content…`).catch(() => {});
+  return bot.handleUpdate({ ...ctx.update, message: { ...ctx.message, text: `/${action} ${topic}` } });
+});
+
+// ── Claude branch task (extracted so it can be called directly) ───────────────
+
+async function runClaudeTask(ctx, text) {
+  const chatId  = ctx.chat.id;
+  const existing = getSession(chatId);
+
+  const placeholder = await ctx.reply('⏳ Working on branch…');
+  const stop = keepTyping(ctx);
+
+  const { ok, out, branched, branch, stat } = await withBranch(ctx, text.slice(0, 50), async () => {
+    let result;
+    if (existing) {
+      result = await runCmd('claude', cliArgs(['--resume', existing, '-p', text]), { timeout: 300000 });
+      if (!result.ok && result.out.toLowerCase().includes('not found')) {
+        clearSession(chatId);
+        const beforeIds = sessionIdsInLog();
+        result = await runCmd('claude', cliArgs(['-p', text]), { timeout: 300000 });
+        await new Promise(r => setTimeout(r, 800));
+        const sid = newSessionId(beforeIds);
+        if (sid) {
+          setSession(chatId, sid);
+          await ctx.reply(`⚠️ *Session expired*\nNew: \`${sid}\``, { parse_mode: 'Markdown' });
+        }
+      }
+    } else {
+      const beforeIds = sessionIdsInLog();
+      result = await runCmd('claude', cliArgs(['-p', text]), { timeout: 300000 });
+      await new Promise(r => setTimeout(r, 800));
+      const sid = newSessionId(beforeIds);
+      if (sid) {
+        setSession(chatId, sid);
+        await ctx.reply(`📌 *Session started*\n\`${sid}\``, { parse_mode: 'Markdown' });
+      }
+    }
+    return result;
+  });
+
+  stop();
+
+  const reply = ok ? (out || '(no output)') : `❌ Error\n\`\`\`\n${out}\n\`\`\``;
+  await editThenOverflow(ctx, placeholder.message_id, reply);
+
+  if (branched) {
+    await ctx.reply(
+      `📋 *Changes on \`${branch}\`*\n\`\`\`\n${stat}\n\`\`\`\n\nApprove to merge → main → Vercel deploys.`,
+      { parse_mode: 'Markdown', ...approvalKeyboard(branch) }
+    );
+  }
+}
+
 // ── Main handler — Claude task on a branch ────────────────────────────────────
 
 bot.on('text', async (ctx) => {
@@ -1005,51 +1104,34 @@ bot.on('text', async (ctx) => {
   }
   // ────────────────────────────────────────────────────────────────────────
 
-  const existing = getSession(chatId);
+  // ── Intent-based routing from free text ──────────────────────────────────
+  const intent = detectIntent(text);
+  if (intent) {
+    const directRoutes = { status: '/status', build: '/build', branches: '/branches', summarize: '/summarize', todo: '/todo', reset: '/reset' };
+    const topicRoutes  = { tweet: 'tweet', linkedin: 'linkedin', instagram: 'instagram', reddit: 'reddit', newpost: 'newpost', draft: 'draft' };
+    if (directRoutes[intent]) return bot.handleUpdate({ ...ctx.update, message: { ...ctx.message, text: directRoutes[intent] } });
+    if (topicRoutes[intent])  return bot.handleUpdate({ ...ctx.update, message: { ...ctx.message, text: `/${topicRoutes[intent]} ${text}` } });
+  }
 
-  await ctx.sendChatAction('typing');
-  const placeholder = await ctx.reply('⏳ Working on branch…');
-  const stop = keepTyping(ctx);
-
-  const { ok, out, branched, branch, stat } = await withBranch(ctx, text.slice(0, 50), async () => {
-    let result;
-    if (existing) {
-      result = await runCmd('claude', cliArgs(['--resume', existing, '-p', text]), { timeout: 300000 });
-      if (!result.ok && result.out.toLowerCase().includes('not found')) {
-        clearSession(chatId);
-        const beforeIds = sessionIdsInLog();
-        result = await runCmd('claude', cliArgs(['-p', text]), { timeout: 300000 });
-        await new Promise(r => setTimeout(r, 800));
-        const sid = newSessionId(beforeIds);
-        if (sid) {
-          setSession(chatId, sid);
-          await ctx.reply(`⚠️ *Session expired*\nNew: \`${sid}\``, { parse_mode: 'Markdown' });
-        }
+  // ── Short/ambiguous text → show action picker ─────────────────────────────
+  if (text.split(/\s+/).length <= 10 && !intent) {
+    PENDING.set(chatId, { type: 'quickact', topic: text });
+    return ctx.reply(
+      `*"${text.slice(0, 80)}"*\n\nWhat do you want to do?`,
+      {
+        parse_mode: 'Markdown',
+        ...Markup.inlineKeyboard([
+          [Markup.button.callback('🐦 Tweet', 'qa:tweet'),     Markup.button.callback('💼 LinkedIn', 'qa:linkedin')],
+          [Markup.button.callback('📸 Instagram', 'qa:instagram'), Markup.button.callback('🔴 Reddit', 'qa:reddit')],
+          [Markup.button.callback('📝 Blog Post', 'qa:newpost'),   Markup.button.callback('📋 Outline', 'qa:draft')],
+          [Markup.button.callback('🤖 Run as Claude task →', 'qa:claude')],
+        ]),
       }
-    } else {
-      const beforeIds = sessionIdsInLog();
-      result = await runCmd('claude', cliArgs(['-p', text]), { timeout: 300000 });
-      await new Promise(r => setTimeout(r, 800));
-      const sid = newSessionId(beforeIds);
-      if (sid) {
-        setSession(chatId, sid);
-        await ctx.reply(`📌 *Session started*\n\`${sid}\``, { parse_mode: 'Markdown' });
-      }
-    }
-    return result;
-  });
-
-  stop();
-
-  const reply = ok ? (out || '(no output)') : `❌ Error\n\`\`\`\n${out}\n\`\`\``;
-  await editThenOverflow(ctx, placeholder.message_id, reply);
-
-  if (branched) {
-    await ctx.reply(
-      `📋 *Changes on \`${branch}\`*\n\`\`\`\n${stat}\n\`\`\`\n\nApprove to merge → main → Vercel deploys.`,
-      { parse_mode: 'Markdown', ...approvalKeyboard(branch) }
     );
   }
+
+  // ── Long detailed text → Claude task on branch ────────────────────────────
+  await runClaudeTask(ctx, text);
 });
 
 // ── Error handler ─────────────────────────────────────────────────────────────
